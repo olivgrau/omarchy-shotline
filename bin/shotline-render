@@ -1,0 +1,309 @@
+#!/usr/bin/env python
+"""Rendert eine Screenshot-Session als HTML und Markdown.
+
+Aufruf:  shotline-render <session-verzeichnis>
+
+Liest session.json im Verzeichnis und schreibt session.html und session.md
+daneben. Die Bildpfade bleiben relativ, damit der ganze Ordner verschiebbar
+bleibt. Das Markdown ist die Fassung fuer den KI-Agenten, das HTML die
+Fassung zum Ansehen.
+"""
+
+import html
+import json
+import os
+import sys
+from datetime import datetime
+
+SCHEMA = 1
+
+
+# --------------------------------------------------------------- laden
+
+def load_session(session_dir):
+    path = os.path.join(session_dir, "session.json")
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    if data.get("schema") != SCHEMA:
+        raise ValueError("unbekannte Schema-Version: %r" % data.get("schema"))
+    data.setdefault("shots", [])
+    data.setdefault("title", "Screenshot-Session")
+    data.setdefault("id", "")
+    data.setdefault("created", "")
+    return data
+
+
+def fmt_time(iso, with_date=True):
+    """ISO-Zeitstempel in deutsche Schreibweise. Unlesbares bleibt unveraendert."""
+    if not iso:
+        return ""
+    try:
+        stamp = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    return stamp.strftime("%d.%m.%Y um %H:%M") if with_date else stamp.strftime("%H:%M:%S")
+
+
+def shot_label(shot, index):
+    comment = (shot.get("comment") or "").strip()
+    if comment:
+        first = comment.splitlines()[0].strip()
+        if len(first) > 70:
+            first = first[:67].rstrip() + "..."
+        return first
+    return "Schritt %d" % index
+
+
+def size_line(shot):
+    """Groesse des Ausschnitts. Auf HiDPI-Schirmen hat das PNG mehr Pixel als
+    die Auswahl logisch breit war; dann steht beides da."""
+    width = shot.get("width")
+    height = shot.get("height")
+    if not width or not height:
+        return ""
+    text = "%sx%s px" % (width, height)
+    pixel_width = shot.get("pixelWidth")
+    pixel_height = shot.get("pixelHeight")
+    if pixel_width and pixel_height and (pixel_width != width or pixel_height != height):
+        text += " (Bild: %sx%s px)" % (pixel_width, pixel_height)
+    return text
+
+
+def window_line(shot):
+    app = (shot.get("app") or "").strip()
+    title = (shot.get("window") or "").strip()
+    if app and title:
+        return '%s: "%s"' % (app, title)
+    return app or title
+
+
+# --------------------------------------------------------------- markdown
+
+def render_markdown(data, session_dir):
+    shots = data["shots"]
+    lines = []
+    lines.append("# Screenshot-Session: %s" % data["title"])
+    lines.append("")
+    created = fmt_time(data.get("created"))
+    count = len(shots)
+    noun = "Screenshot" if count == 1 else "Screenshots"
+    intro = "%d %s mit Kommentar." % (count, noun)
+    if created:
+        intro = "Aufgenommen am %s. %s" % (created, intro)
+    lines.append(intro)
+    lines.append("")
+    lines.append("Die PNG-Dateien liegen im selben Verzeichnis wie diese Datei. "
+                 "Die Reihenfolge der Abschnitte ist die Reihenfolge der Bedienschritte. "
+                 "Oeffne ein Bild, wenn der Kommentar allein nicht reicht.")
+    lines.append("")
+
+    if not shots:
+        lines.append("Diese Session enthaelt keine Screenshots.")
+        lines.append("")
+    for index, shot in enumerate(shots, start=1):
+        lines.append("## %d. %s" % (index, shot_label(shot, index)))
+        lines.append("")
+        lines.append("![Schritt %d](%s)" % (index, shot.get("file", "")))
+        lines.append("")
+        lines.append("- Datei: `%s`" % shot.get("file", ""))
+        size = size_line(shot)
+        if size:
+            lines.append("- Ausschnitt: %s" % size)
+        window = window_line(shot)
+        if window:
+            lines.append("- Fenster: %s" % window)
+        if shot.get("annotated"):
+            lines.append("- Im Bild markiert: die Hervorhebungen gehoeren zum Kommentar")
+        taken = fmt_time(shot.get("taken"), with_date=False)
+        if taken:
+            lines.append("- Zeit: %s" % taken)
+        lines.append("")
+        comment = (shot.get("comment") or "").strip()
+        if comment:
+            lines.append("Kommentar:")
+            lines.append("")
+            for row in comment.splitlines():
+                lines.append("> %s" % row)
+        else:
+            lines.append("Kommentar: keiner")
+        lines.append("")
+
+    text = "\n".join(lines).rstrip() + "\n"
+    target = os.path.join(session_dir, "session.md")
+    with open(target, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return target
+
+
+# ------------------------------------------------------------------ html
+
+CSS = """
+:root{
+  --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d8dee4;
+  --text:#1c2128; --muted:#5b6672; --accent:#b8740f; --accent-bg:rgba(184,116,15,.10);
+  --radius:12px; --shadow:0 1px 3px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.05);
+}
+html[data-theme="dark"]{
+  --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2b3440;
+  --text:#e6edf3; --muted:#9aa7b4; --accent:#f5a623; --accent-bg:rgba(245,166,35,.14);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6;
+     background:var(--bg);color:var(--text);padding:2rem 1rem;-webkit-font-smoothing:antialiased}
+.container{max-width:1100px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:1.4rem}
+h1{font-size:1.7rem;font-weight:800;letter-spacing:-.4px}
+.meta{color:var(--muted);margin-top:.25rem}
+.toolbar{display:flex;align-items:center;gap:.7rem;flex:0 0 auto}
+.badge{background:var(--accent-bg);color:var(--accent);font-weight:700;font-size:.82rem;
+       padding:.45rem .8rem;border-radius:20px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.toggle{cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--text);
+        width:40px;height:40px;border-radius:10px;font-size:1.1rem;display:grid;place-items:center}
+.toggle:hover{background:var(--panel2)}
+.hint{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+      padding:.9rem 1.1rem;color:var(--muted);font-size:.9rem;margin-bottom:1.6rem}
+.hint code{font-family:ui-monospace,"JetBrains Mono",monospace;color:var(--text)}
+.shot{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+      box-shadow:var(--shadow);overflow:hidden;margin-bottom:1.6rem}
+.shot-head{display:flex;gap:.8rem;align-items:baseline;padding:1rem 1.2rem;border-bottom:1px solid var(--line)}
+.num{flex:0 0 auto;background:var(--accent-bg);color:var(--accent);font-weight:800;
+     border-radius:8px;padding:.15rem .6rem;font-variant-numeric:tabular-nums}
+.shot-title{font-weight:700;font-size:1.05rem}
+.shot-body{padding:1.1rem 1.2rem}
+.comment{white-space:pre-wrap;margin-bottom:1rem}
+.comment.empty{color:var(--muted);font-style:italic}
+figure{margin:0}
+figure img{display:block;max-width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel2)}
+figcaption{color:var(--muted);font-size:.8rem;margin-top:.5rem;
+           font-family:ui-monospace,"JetBrains Mono",monospace}
+.facts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
+.fact{background:var(--panel2);border:1px solid var(--line);border-radius:6px;
+      padding:.2rem .55rem;font-size:.78rem;color:var(--muted);
+      font-family:ui-monospace,"JetBrains Mono",monospace}
+.empty-state{background:var(--panel);border:1px dashed var(--line);border-radius:var(--radius);
+             padding:2rem;text-align:center;color:var(--muted)}
+footer{color:var(--muted);font-size:.8rem;margin-top:2rem;text-align:center}
+"""
+
+SCRIPT = """
+var root=document.documentElement;
+try{ if(localStorage.getItem('shotline-theme')==='dark') root.setAttribute('data-theme','dark'); }catch(e){}
+function toggleTheme(){
+  var dark=root.getAttribute('data-theme')==='dark';
+  if(dark){ root.removeAttribute('data-theme'); try{localStorage.setItem('shotline-theme','light')}catch(e){} }
+  else { root.setAttribute('data-theme','dark'); try{localStorage.setItem('shotline-theme','dark')}catch(e){} }
+}
+"""
+
+
+def esc(value):
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def render_html(data, session_dir):
+    shots = data["shots"]
+    count = len(shots)
+    created = fmt_time(data.get("created"))
+    parts = []
+    parts.append("<!DOCTYPE html>")
+    parts.append('<html lang="de">')
+    parts.append("<head>")
+    parts.append('<meta charset="UTF-8">')
+    parts.append('<meta name="viewport" content="width=device-width, initial-scale=1.0">')
+    parts.append("<title>Screenshots: %s</title>" % esc(data["title"]))
+    parts.append("<style>%s</style>" % CSS)
+    parts.append("</head>")
+    parts.append("<body>")
+    parts.append('<div class="container">')
+    parts.append("  <header>")
+    parts.append("    <div>")
+    parts.append("      <h1>%s</h1>" % esc(data["title"]))
+    meta = "%d Screenshot%s" % (count, "" if count == 1 else "s")
+    if created:
+        meta += " &middot; aufgenommen am %s" % esc(created)
+    parts.append('      <p class="meta">%s</p>' % meta)
+    parts.append("    </div>")
+    parts.append('    <div class="toolbar">')
+    parts.append('      <span class="badge">%s</span>' % esc(data.get("id", "")))
+    parts.append('      <button class="toggle" onclick="toggleTheme()" '
+                 'title="Hell/Dunkel umschalten" aria-label="Theme">&#9788;</button>')
+    parts.append("    </div>")
+    parts.append("  </header>")
+    parts.append('  <p class="hint">Diese Seite fasst die Schritte in der Reihenfolge der Aufnahme '
+                 'zusammen. Fuer einen KI-Agenten liegt dieselbe Information als '
+                 '<code>session.md</code> daneben.</p>')
+
+    if not shots:
+        parts.append('  <div class="empty-state">Diese Session enthaelt keine Screenshots.</div>')
+
+    for index, shot in enumerate(shots, start=1):
+        comment = (shot.get("comment") or "").strip()
+        parts.append('  <section class="shot">')
+        parts.append('    <div class="shot-head">')
+        parts.append('      <span class="num">%d</span>' % index)
+        parts.append('      <span class="shot-title">%s</span>' % esc(shot_label(shot, index)))
+        parts.append("    </div>")
+        parts.append('    <div class="shot-body">')
+        if comment:
+            parts.append('      <p class="comment">%s</p>' % esc(comment))
+        else:
+            parts.append('      <p class="comment empty">Kein Kommentar hinterlegt.</p>')
+        parts.append("      <figure>")
+        parts.append('        <img src="%s" alt="Schritt %d: %s" loading="lazy">'
+                     % (esc(shot.get("file", "")), index, esc(shot_label(shot, index))))
+        parts.append("        <figcaption>%s</figcaption>" % esc(shot.get("file", "")))
+        parts.append("      </figure>")
+        facts = []
+        size = size_line(shot)
+        if size:
+            facts.append(size)
+        window = window_line(shot)
+        if window:
+            facts.append(window)
+        if shot.get("annotated"):
+            facts.append("im Bild markiert")
+        taken = fmt_time(shot.get("taken"), with_date=False)
+        if taken:
+            facts.append(taken)
+        if facts:
+            parts.append('      <div class="facts">')
+            for fact in facts:
+                parts.append('        <span class="fact">%s</span>' % esc(fact))
+            parts.append("      </div>")
+        parts.append("    </div>")
+        parts.append("  </section>")
+
+    parts.append("  <footer>Erzeugt vom Omarchy-Plugin Shotline.</footer>")
+    parts.append("</div>")
+    parts.append("<script>%s</script>" % SCRIPT)
+    parts.append("</body>")
+    parts.append("</html>")
+
+    text = "\n".join(parts) + "\n"
+    target = os.path.join(session_dir, "session.html")
+    with open(target, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return target
+
+
+# ------------------------------------------------------------------ main
+
+def main(argv):
+    if len(argv) != 2:
+        sys.stderr.write("Aufruf: shotline-render <session-verzeichnis>\n")
+        return 2
+    session_dir = argv[1]
+    if not os.path.isdir(session_dir):
+        sys.stderr.write("Verzeichnis nicht gefunden: %s\n" % session_dir)
+        return 1
+    data = load_session(session_dir)
+    html_path = render_html(data, session_dir)
+    md_path = render_markdown(data, session_dir)
+    print(html_path)
+    print(md_path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

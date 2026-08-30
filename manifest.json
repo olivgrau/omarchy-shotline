@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "olivgrau.shotline",
+  "name": "Shotline",
+  "version": "1.0.0",
+  "author": "Oliver Graumnitz",
+  "license": "MIT",
+  "description": "Schrittweise Screenshots mit Kommentar sammeln, markieren und als HTML plus Markdown fuer KI-Agenten ablegen",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Shotline",
+    "description": "Laufende Screenshot-Session: Zaehler, Klick nimmt auf, Stift markiert, Rechtsklick oeffnet das Menue",
+    "category": "Utilities",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "hideWhenIdle": false,
+      "showCount": true,
+      "showPen": true
+    },
+    "schema": [
+      {
+        "key": "hideWhenIdle",
+        "type": "bool",
+        "label": "Nur anzeigen, wenn eine Session laeuft"
+      },
+      {
+        "key": "showCount",
+        "type": "bool",
+        "label": "Anzahl der Shots neben dem Symbol zeigen"
+      },
+      {
+        "key": "showPen",
+        "type": "bool",
+        "label": "Stift-Symbol zum Markieren zeigen"
+      },
+      {
+        "key": "command",
+        "type": "string",
+        "label": "Pfad zur CLI (leer = mitgelieferte)"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+# Interne Arbeitsnotizen und Projektplan: lokal, nicht Teil des Plugins
+CLAUDE.md
+tasks/
+
+# Das frueher hier liegende Claude-App-Template
+_archiv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Backups des Installers
+*.shotline-bak.*

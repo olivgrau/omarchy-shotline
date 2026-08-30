@@ -1,0 +1,845 @@
+#!/bin/bash
+#
+# shotline -- schrittweise Screenshots mit Kommentar sammeln.
+#
+# Eine Session sammelt Screenshots in einem Arbeitsverzeichnis. Jeder Shot
+# bekommt sofort einen Kommentar. Am Ende waehlt der Nutzer ein Zielverzeichnis;
+# dorthin wandern die PNGs samt session.html (zum Ansehen) und session.md
+# (fuer den KI-Agenten). Zum Schluss liegt ein fertiger Agenten-Prompt in der
+# Zwischenablage.
+#
+#   shotline shot          Screenshot aufnehmen und kommentieren
+#   shotline finish        Session abschliessen und ablegen
+#   shotline status --json Zustand fuer das Bar-Widget
+#
+# Alle Zustaende liegen unter $XDG_STATE_HOME/shotline.
+
+set -uo pipefail
+
+VERSION="1.0.0"
+PLUGIN_ID="olivgrau.shotline"
+SCHEMA=1
+
+STATE_DIR="${SHOTLINE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/shotline}"
+SESSIONS_DIR="$STATE_DIR/sessions"
+CURRENT_FILE="$STATE_DIR/current"
+RECENT_FILE="$STATE_DIR/recent-targets"
+LAST_RESULT_FILE="$STATE_DIR/last-result"
+RECENT_MAX=8
+
+# Dieselben Pfade, die omarchy-capture-region benutzt: die Tastenbefehle an
+# slurps Auswahl-Layer schreiben dorthin, egal wer slurp gestartet hat.
+FULLSCREEN_MARKER="${XDG_RUNTIME_DIR:-/tmp}/omarchy-capture-region-fullscreen"
+WINDOW_MARKER="${XDG_RUNTIME_DIR:-/tmp}/omarchy-capture-region-window"
+
+SELF_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RENDERER="${SHOTLINE_RENDERER:-$SELF_DIR/shotline-render}"
+PYTHON="${SHOTLINE_PYTHON:-python}"
+
+# ------------------------------------------------------------------ hilfen
+
+die() {
+  echo "shotline: $*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "$1 fehlt. Bitte installieren."
+}
+
+notify() {
+  local title="$1" body="${2:-}"
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send "$title" ${body:+"$body"} -t 2500 >/dev/null 2>&1 && return 0
+  fi
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send -t 2500 "$title" "$body" >/dev/null 2>&1 && return 0
+  fi
+  echo "$title${body:+ -- $body}"
+}
+
+# Das Bar-Widget pollt ohnehin, aber ein Stups laesst den Zaehler sofort springen.
+poke_widget() {
+  command -v omarchy-shell >/dev/null 2>&1 || return 0
+  omarchy-shell "$PLUGIN_ID" refresh >/dev/null 2>&1 || true
+}
+
+now_iso() { date --iso-8601=seconds; }
+
+# Ein abgebrochener Lauf darf weder den eingefrorenen Bildschirm noch eine
+# umgestellte Cursor-Einstellung hinterlassen.
+FREEZE_PID=""
+RESTORE_CURSORS=""
+
+cleanup() {
+  [[ -n $FREEZE_PID ]] && kill "$FREEZE_PID" 2>/dev/null
+  [[ -n $RESTORE_CURSORS ]] && hyprctl keyword cursor:no_hardware_cursors "$RESTORE_CURSORS" >/dev/null 2>&1
+  FREEZE_PID=""
+  RESTORE_CURSORS=""
+  return 0
+}
+trap cleanup EXIT INT TERM
+
+# Kommentar zu Dateinamen: Umlaute ausschreiben, Rest auf a-z0-9- eindampfen.
+slugify() {
+  local text="${1:-}"
+  text="${text//ä/ae}"; text="${text//ö/oe}"; text="${text//ü/ue}"
+  text="${text//Ä/ae}"; text="${text//Ö/oe}"; text="${text//Ü/ue}"
+  text="${text//ß/ss}"
+  text=$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-')
+  text=$(printf '%s' "$text" | sed -e 's/-\+/-/g' -e 's/^-//' -e 's/-$//')
+  text="${text:0:40}"
+  printf '%s' "${text%-}"
+}
+
+# Breite und Hoehe aus dem IHDR-Block eines PNG. Auf HiDPI-Schirmen ist das
+# Bild groesser als die logische Auswahl, und fuer den Agenten zaehlt das Bild.
+png_size() {
+  local file="$1" signature hex
+  signature=$(od -An -tx1 -N8 "$file" 2>/dev/null | tr -d ' \n')
+  [[ $signature == "89504e470d0a1a0a" ]] || return 1
+  hex=$(od -An -tx1 -j16 -N8 "$file" 2>/dev/null | tr -d ' \n')
+  [[ ${#hex} -eq 16 ]] || return 1
+  printf '%d %d' "$((16#${hex:0:8}))" "$((16#${hex:8:8}))"
+}
+
+# ------------------------------------------------------------------ dialoge
+
+# Freitext. Bevorzugt den Omarchy-Menue-Dialog, damit die Eingabe ohne
+# Terminalfenster direkt ueber dem Screen erscheint.
+ask_text() {
+  local prompt="$1" answer
+  if [[ -n ${SHOTLINE_ANSWER:-} ]]; then
+    printf '%s' "$SHOTLINE_ANSWER"
+    return 0
+  fi
+  if command -v omarchy-menu-input >/dev/null 2>&1; then
+    answer=$(omarchy-menu-input "$prompt" --width 620 2>/dev/null) || return 1
+    printf '%s' "$answer"
+    return 0
+  fi
+  if command -v gum >/dev/null 2>&1 && [[ -t 0 ]]; then
+    answer=$(gum input --prompt "$prompt: " --width 80) || return 1
+    printf '%s' "$answer"
+    return 0
+  fi
+  [[ -t 0 ]] || return 1
+  read -r -p "$prompt: " answer || return 1
+  printf '%s' "$answer"
+}
+
+# Auswahl aus einer Liste. Gibt die gewaehlte Zeile aus, 1 bei Abbruch.
+ask_select() {
+  local prompt="$1"; shift
+  local options=("$@") choice index
+  ((${#options[@]} > 0)) || return 1
+
+  if [[ -n ${SHOTLINE_CHOICE:-} ]]; then
+    printf '%s' "$SHOTLINE_CHOICE"
+    return 0
+  fi
+  if command -v omarchy-menu-select >/dev/null 2>&1; then
+    choice=$(printf '%s\n' "${options[@]}" | omarchy-menu-select "$prompt" -- --width 780 --maxheight 460 2>/dev/null) || return 1
+    printf '%s' "$choice"
+    return 0
+  fi
+  if command -v gum >/dev/null 2>&1 && [[ -t 0 ]]; then
+    choice=$(printf '%s\n' "${options[@]}" | gum choose --header "$prompt") || return 1
+    printf '%s' "$choice"
+    return 0
+  fi
+  [[ -t 0 ]] || return 1
+  echo "$prompt" >&2
+  for index in "${!options[@]}"; do
+    printf '  %d) %s\n' "$((index + 1))" "${options[index]}" >&2
+  done
+  read -r -p "Nummer: " index || return 1
+  [[ $index =~ ^[0-9]+$ ]] && ((index >= 1 && index <= ${#options[@]})) || return 1
+  printf '%s' "${options[index - 1]}"
+}
+
+# ------------------------------------------------------------------ session
+
+session_dir() {
+  [[ -s $CURRENT_FILE ]] || return 1
+  local dir
+  dir=$(<"$CURRENT_FILE")
+  [[ -n $dir && -f $dir/session.json ]] || return 1
+  printf '%s' "$dir"
+}
+
+session_count() {
+  local dir="$1"
+  jq -r '.shots | length' "$dir/session.json" 2>/dev/null || echo 0
+}
+
+session_title() {
+  local dir="$1"
+  jq -r '.title // ""' "$dir/session.json" 2>/dev/null || echo ""
+}
+
+start_session() {
+  local title="${1:-}" id dir
+  id=$(date +'%Y-%m-%d_%H-%M-%S')
+  dir="$SESSIONS_DIR/$id"
+  # Zwei Starts in derselben Sekunde bekommen getrennte Verzeichnisse.
+  local suffix=1
+  while [[ -e $dir ]]; do
+    dir="$SESSIONS_DIR/$id-$suffix"
+    ((suffix++))
+  done
+  mkdir -p "$dir" || die "kann $dir nicht anlegen"
+  jq -n --argjson schema "$SCHEMA" --arg id "$(basename "$dir")" \
+    --arg title "$title" --arg created "$(now_iso)" \
+    '{schema:$schema, id:$id, title:$title, created:$created, shots:[]}' \
+    >"$dir/session.json" || die "kann session.json nicht schreiben"
+  printf '%s' "$dir" >"$CURRENT_FILE"
+  printf '%s' "$dir"
+}
+
+ensure_session() {
+  local dir
+  if dir=$(session_dir); then
+    printf '%s' "$dir"
+    return 0
+  fi
+  start_session ""
+}
+
+# ------------------------------------------------------------------ capture
+
+active_workspace() {
+  hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused == true) | .activeWorkspace.id'
+}
+
+# Monitore rechnen in physischen Pixeln und koennen gedreht sein; slurp und
+# grim erwarten die logische Geometrie.
+monitor_rects() {
+  hyprctl monitors -j 2>/dev/null | jq -r --arg ws "$(active_workspace)" '
+    .[] | select(.activeWorkspace.id == ($ws | tonumber))
+    | .x as $x | .y as $y
+    | (.width / .scale | floor) as $w | (.height / .scale | floor) as $h
+    | if .transform == 1 or .transform == 3
+      then "\($x),\($y) \($h)x\($w)"
+      else "\($x),\($y) \($w)x\($h)" end'
+}
+
+window_rects() {
+  hyprctl clients -j 2>/dev/null | jq -r --arg ws "$(active_workspace)" '
+    [ .[] | select(.workspace.id == ($ws | tonumber) and .hidden != true)
+      | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])" ] | unique[]'
+}
+
+focused_monitor_geo() {
+  hyprctl monitors -j 2>/dev/null | jq -r '
+    .[] | select(.focused == true)
+    | .x as $x | .y as $y
+    | (.width / .scale | floor) as $w | (.height / .scale | floor) as $h
+    | if .transform == 1 or .transform == 3
+      then "\($x),\($y) \($h)x\($w)"
+      else "\($x),\($y) \($w)x\($h)" end'
+}
+
+# Rechtecke aller Fenster und Monitore des aktiven Workspace. slurp nutzt sie
+# als Fangpunkte, damit ein Klick ein ganzes Fenster auswaehlt.
+capture_rects() {
+  command -v hyprctl >/dev/null 2>&1 || return 0
+  [[ -n $(active_workspace) ]] || return 0
+  monitor_rects
+  window_rects
+}
+
+# Kleinstes Rechteck von stdin, das den Punkt enthaelt. slurp hebt genauso das
+# kleinste hervor, also trifft die Aufloesung hier dieselbe Wahl wie die Anzeige.
+rect_at() {
+  local x=$1 y=$2 rect best="" best_area=0 area
+  while IFS= read -r rect; do
+    [[ $rect =~ ^(-?[0-9]+),(-?[0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]] || continue
+    ((x >= BASH_REMATCH[1] && x < BASH_REMATCH[1] + BASH_REMATCH[3] &&
+      y >= BASH_REMATCH[2] && y < BASH_REMATCH[2] + BASH_REMATCH[4])) || continue
+    area=$((BASH_REMATCH[3] * BASH_REMATCH[4]))
+    if [[ -z $best ]] || ((area < best_area)); then
+      best=$rect
+      best_area=$area
+    fi
+  done
+  [[ -n $best ]] || return 1
+  printf '%s' "$best"
+}
+
+# Was slurp gerade unter dem Zeiger hervorhebt. Fenster gehen vor Monitor, wie
+# im Omarchy-Picker; ein Zeiger in einer Luecke trifft den Monitor.
+geo_at_cursor() {
+  local pos x y
+  pos=$(hyprctl cursorpos 2>/dev/null) || { focused_monitor_geo; return; }
+  x=${pos%,*}
+  y=${pos#*, }
+  rect_at "$x" "$y" < <(window_rects) && return 0
+  rect_at "$x" "$y" < <(monitor_rects) && return 0
+  focused_monitor_geo
+}
+
+# Auswahl ueber eingefrorenem Bildschirm. slurp -d blendet die Groesse des
+# Ausschnitts waehrend des Ziehens ein -- genau das will der Nutzer sehen.
+# Gibt "X,Y BxH" aus; 1 bei Abbruch.
+pick_region() {
+  if [[ -n ${SHOTLINE_GEOMETRY:-} ]]; then
+    printf '%s' "$SHOTLINE_GEOMETRY"
+    return 0
+  fi
+  need slurp
+
+  local rects selection
+  if command -v hyprpicker >/dev/null 2>&1; then
+    hyprpicker -r -z >/dev/null 2>&1 &
+    FREEZE_PID=$!
+    sleep 0.1
+  fi
+
+  # Waehrend slurp laeuft, bindet Omarchy Tasten an seine Auswahl-Layer:
+  # Return nimmt das hervorgehobene Fenster, Ctrl+Return den ganzen Bildschirm.
+  # Beide beenden slurp und hinterlassen nur eine Markerdatei, also fragen wir
+  # sie danach ab. Tab und die Pfeiltasten bewegen bloss den Zeiger und
+  # brauchen hier nichts.
+  rm -f "$FULLSCREEN_MARKER" "$WINDOW_MARKER"
+
+  rects=$(capture_rects)
+  if [[ -n $rects ]]; then
+    selection=$(printf '%s\n' "$rects" | slurp -d 2>/dev/null)
+  else
+    selection=$(slurp -d 2>/dev/null)
+  fi
+
+  if [[ -z $selection && -e $FULLSCREEN_MARKER ]]; then
+    selection=$(focused_monitor_geo)
+  elif [[ -z $selection && -e $WINDOW_MARKER ]]; then
+    selection=$(geo_at_cursor)
+  fi
+  rm -f "$FULLSCREEN_MARKER" "$WINDOW_MARKER"
+
+  # Ein blosser Klick (Flaeche unter 20 px^2) waehlt das Rechteck darunter aus.
+  if [[ $selection =~ ^(-?[0-9]+),(-?[0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]] \
+     && ((BASH_REMATCH[3] * BASH_REMATCH[4] < 20)); then
+    local snapped
+    snapped=$(rect_at "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" <<<"$rects") && selection="$snapped"
+  fi
+
+  [[ -n $FREEZE_PID ]] && kill "$FREEZE_PID" 2>/dev/null
+  FREEZE_PID=""
+  [[ -n $selection ]] || return 1
+  printf '%s' "$selection"
+}
+
+# Fenster, dessen Rechteck den Mittelpunkt der Auswahl enthaelt. Liefert
+# "class<TAB>title", sonst nichts.
+window_at() {
+  command -v hyprctl >/dev/null 2>&1 || return 0
+  local geometry="$1"
+  [[ $geometry =~ ^(-?[0-9]+),(-?[0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]] || return 0
+  local cx=$((BASH_REMATCH[1] + BASH_REMATCH[3] / 2))
+  local cy=$((BASH_REMATCH[2] + BASH_REMATCH[4] / 2))
+
+  local ws
+  ws=$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused == true) | .activeWorkspace.id')
+  [[ -n $ws ]] || return 0
+
+  hyprctl clients -j 2>/dev/null | jq -r --argjson x "$cx" --argjson y "$cy" --arg ws "$ws" '
+    [ .[] | select(.hidden != true and .workspace.id == ($ws | tonumber))
+      | select($x >= .at[0] and $x < (.at[0] + .size[0]))
+      | select($y >= .at[1] and $y < (.at[1] + .size[1]))
+      | {c: .class, t: .title, area: (.size[0] * .size[1])} ]
+    | sort_by(.area) | .[0] // empty | "\(.c)\t\(.t)"'
+}
+
+# Weiche Cursor werden von grim mitfotografiert. Waehrend der Aufnahme
+# erzwingen wir Hardware-Cursor und stellen die Einstellung danach zurueck.
+# Ein schlafender Bildschirm liefert grim keinen Frame: grim wartet dann
+# endlos. Lieber vorher wecken und die Wartezeit hart begrenzen.
+wake_display() {
+  command -v hyprctl >/dev/null 2>&1 || return 0
+  local sleeping
+  sleeping=$(hyprctl monitors -j 2>/dev/null | jq -r '[.[] | select(.dpmsStatus == false)] | length')
+  [[ ${sleeping:-0} -gt 0 ]] || return 0
+  # Hyprland mit Lua-Konfiguration (Omarchy 4) versteht die alte Kurzform
+  # "dispatch dpms on" nicht mehr, aeltere Installationen dafuer nur die.
+  hyprctl eval 'hl.dispatch(hl.dsp.dpms("on"))' >/dev/null 2>&1 \
+    || hyprctl dispatch dpms on >/dev/null 2>&1
+  sleep 0.3
+}
+
+grab() {
+  local geometry="$1" target="$2" rc=0
+  need grim
+  wake_display
+  if command -v hyprctl >/dev/null 2>&1; then
+    RESTORE_CURSORS=$(hyprctl getoption cursor:no_hardware_cursors -j 2>/dev/null | jq -r '.int // empty')
+    [[ -n $RESTORE_CURSORS ]] && hyprctl keyword cursor:no_hardware_cursors 0 >/dev/null 2>&1
+  fi
+
+  local limit="${SHOTLINE_GRAB_TIMEOUT:-20}"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$limit" grim -g "$geometry" "$target" || rc=$?
+  else
+    grim -g "$geometry" "$target" || rc=$?
+  fi
+
+  if [[ -n $RESTORE_CURSORS ]]; then
+    hyprctl keyword cursor:no_hardware_cursors "$RESTORE_CURSORS" >/dev/null 2>&1
+    RESTORE_CURSORS=""
+  fi
+  ((rc == 124)) && warn_slow_grab
+  return $rc
+}
+
+warn_slow_grab() {
+  echo "shotline: grim hat nach ${SHOTLINE_GRAB_TIMEOUT:-20}s nichts geliefert." >&2
+  echo "  Der Bildschirm schlaeft vermutlich. Wecke ihn und versuche es erneut." >&2
+}
+
+# ------------------------------------------------------------------ befehle
+
+cmd_start() {
+  local title="${1:-}" dir
+  if dir=$(session_dir); then
+    die "es laeuft bereits eine Session mit $(session_count "$dir") Shots. Nutze finish oder cancel."
+  fi
+  dir=$(start_session "$title")
+  notify "Screenshot-Session gestartet" "Naechster Shot: Super + Shift + S"
+  poke_widget
+  echo "$dir"
+}
+
+cmd_shot() {
+  local comment="" have_comment=false
+  while (($# > 0)); do
+    case "$1" in
+      --comment) shift; comment="${1:-}"; have_comment=true ;;
+      --comment=*) comment="${1#--comment=}"; have_comment=true ;;
+      *) die "unbekannte Option fuer shot: $1" ;;
+    esac
+    shift
+  done
+
+  need jq
+  local dir geometry width height index number file target window app title
+  dir=$(ensure_session)
+
+  geometry=$(pick_region) || { echo "Auswahl abgebrochen." >&2; return 1; }
+  [[ $geometry =~ ^(-?[0-9]+),(-?[0-9]+)[[:space:]]([0-9]+)x([0-9]+)$ ]] \
+    || die "unerwartete Geometrie: $geometry"
+  width=${BASH_REMATCH[3]}
+  height=${BASH_REMATCH[4]}
+
+  window=$(window_at "$geometry")
+  app=${window%%$'\t'*}
+  title=${window#*$'\t'}
+  [[ $window == "$app" ]] && title=""
+
+  index=$(session_count "$dir")
+  number=$(printf '%02d' "$((index + 1))")
+  target=$(mktemp "$dir/.pending-XXXXXX.png") || die "kein temporaeres Bild moeglich"
+  grab "$geometry" "$target" || { rm -f "$target"; die "grim konnte nicht aufnehmen"; }
+
+  if [[ $have_comment == false ]]; then
+    # Die Groesse steht im Prompt, damit der Nutzer den Ausschnitt beim
+    # Kommentieren noch einmal bestaetigt sieht.
+    comment=$(ask_text "Shot $((index + 1)) (${width}x${height} px) -- was passiert hier?") || comment=""
+  fi
+
+  file="$number-$(slugify "$comment")"
+  [[ $file == "$number-" ]] && file="$number-schritt"
+  file="$file.png"
+  mv "$target" "$dir/$file" || die "konnte Bild nicht ablegen"
+  chmod 644 "$dir/$file" 2>/dev/null
+
+  local pixel_width=0 pixel_height=0 measured
+  if measured=$(png_size "$dir/$file"); then
+    pixel_width=${measured%% *}
+    pixel_height=${measured##* }
+  fi
+
+  local tmp_json
+  tmp_json=$(mktemp) || die "kein temporaeres JSON moeglich"
+  jq --arg file "$file" --arg comment "$comment" --arg geometry "$geometry" \
+     --argjson width "$width" --argjson height "$height" \
+     --argjson pixelWidth "$pixel_width" --argjson pixelHeight "$pixel_height" \
+     --arg taken "$(now_iso)" --arg app "$app" --arg window "$title" '
+     .shots += [{
+       index: (.shots | length) + 1,
+       file: $file, comment: $comment, geometry: $geometry,
+       width: $width, height: $height,
+       pixelWidth: $pixelWidth, pixelHeight: $pixelHeight,
+       taken: $taken, app: $app, window: $window
+     }]' "$dir/session.json" >"$tmp_json" \
+    && mv "$tmp_json" "$dir/session.json" || { rm -f "$tmp_json"; die "session.json nicht aktualisierbar"; }
+
+  notify "Shot $((index + 1)) gespeichert" "${width}x${height} px${comment:+ -- $comment}"
+  poke_widget
+  echo "$dir/$file"
+}
+
+# Markieren und Unkenntlichmachen. tensaku ist Omarchys Screenshot-Editor: er
+# speichert in dieselbe Datei zurueck und beendet sich nach dem Speichern.
+# Enter speichert, Escape verwirft.
+open_editor() {
+  local file="$1" tool="${2:-brush}"
+  if [[ -n ${SHOTLINE_EDITOR_STUB:-} ]]; then
+    "$SHOTLINE_EDITOR_STUB" "$file" "$tool"
+    return $?
+  fi
+  local editor="${SHOTLINE_EDITOR:-tensaku}"
+  command -v "$editor" >/dev/null 2>&1 || {
+    echo "shotline: $editor fehlt. Installiere tensaku oder setze SHOTLINE_EDITOR." >&2
+    return 1
+  }
+  "$editor" \
+    --filename "$file" \
+    --output-filename "$file" \
+    --initial-tool "$tool" \
+    --actions-on-enter save-to-file \
+    --actions-on-escape exit \
+    --early-exit
+}
+
+cmd_annotate() {
+  local tool="brush" index=""
+  while (($# > 0)); do
+    case "$1" in
+      --blur) tool="blur" ;;
+      --tool) shift; tool="${1:-brush}" ;;
+      --tool=*) tool="${1#--tool=}" ;;
+      --index) shift; index="${1:-}" ;;
+      --index=*) index="${1#--index=}" ;;
+      *) die "unbekannte Option fuer annotate: $1" ;;
+    esac
+    shift
+  done
+
+  need jq
+  local dir count position file old_comment comment
+  dir=$(session_dir) || die "keine laufende Session."
+  count=$(session_count "$dir")
+  ((count > 0)) || die "die Session hat keine Shots."
+
+  position="${index:-$count}"
+  [[ $position =~ ^[0-9]+$ ]] && ((position >= 1 && position <= count)) \
+    || die "es gibt keinen Shot Nummer $position."
+
+  file=$(jq -r --argjson i "$((position - 1))" '.shots[$i].file' "$dir/session.json")
+  old_comment=$(jq -r --argjson i "$((position - 1))" '.shots[$i].comment' "$dir/session.json")
+  [[ -f $dir/$file ]] || die "die Bilddatei $file fehlt."
+
+  open_editor "$dir/$file" "$tool" || return 1
+
+  # Der Editor darf zuschneiden: die Bildgroesse wird danach neu gemessen.
+  local pixel_width=0 pixel_height=0 measured
+  if measured=$(png_size "$dir/$file"); then
+    pixel_width=${measured%% *}
+    pixel_height=${measured##* }
+  fi
+
+  # Zurueck in den Kommentar. Leere Eingabe behaelt den bisherigen Text.
+  comment=$(ask_text "Kommentar zu Shot $position${old_comment:+ (bisher: $old_comment)}") || comment=""
+  [[ -n $comment ]] || comment="$old_comment"
+
+  local tmp_json
+  tmp_json=$(mktemp)
+  jq --argjson i "$((position - 1))" --arg comment "$comment" \
+     --argjson pixelWidth "$pixel_width" --argjson pixelHeight "$pixel_height" '
+     .shots[$i].comment = $comment
+     | .shots[$i].annotated = true
+     | .shots[$i].pixelWidth = $pixelWidth
+     | .shots[$i].pixelHeight = $pixelHeight' "$dir/session.json" >"$tmp_json" \
+    && mv "$tmp_json" "$dir/session.json" || { rm -f "$tmp_json"; die "session.json nicht aktualisierbar"; }
+
+  notify "Shot $position bearbeitet" "${comment:-ohne Kommentar}"
+  poke_widget
+  echo "$dir/$file"
+}
+
+# Kleines Menue fuer die Bar. Zeigt nur, was gerade moeglich ist.
+cmd_menu() {
+  local dir count title="" options=() choice
+  if dir=$(session_dir); then
+    count=$(session_count "$dir")
+    title=$(session_title "$dir")
+  else
+    dir=""; count=0
+  fi
+
+  options+=($'\uf030\tNaechster Shot')
+  if ((count > 0)); then
+    options+=($'\uf040\tLetzten markieren')
+    options+=($'\uf070\tLetzten unkenntlich machen')
+    options+=($'\uf0e2\tLetzten verwerfen')
+    options+=($'\uf0c7\tSerie abschliessen')
+    options+=($'\uf1f8\tSerie verwerfen')
+  fi
+  [[ -s $LAST_RESULT_FILE ]] && options+=($'\uf06e\tLetztes Ergebnis oeffnen')
+
+  local prompt="Shotline"
+  ((count > 0)) && prompt="$prompt: $count Shot(s)${title:+ -- $title}"
+
+  choice=$(ask_select "$prompt" "${options[@]}") || return 0
+  # Der Menue-Dialog gibt das Label ohne Symbol zurueck.
+  choice="${choice#*$'\t'}"
+
+  case "$choice" in
+    "Naechster Shot") cmd_shot ;;
+    "Letzten markieren") cmd_annotate ;;
+    "Letzten unkenntlich machen") cmd_annotate --blur ;;
+    "Letzten verwerfen") cmd_undo ;;
+    "Serie abschliessen") cmd_finish --open ;;
+    "Serie verwerfen") cmd_cancel ;;
+    "Letztes Ergebnis oeffnen") cmd_open ;;
+    *) return 0 ;;
+  esac
+}
+
+cmd_undo() {
+  need jq
+  local dir count file
+  dir=$(session_dir) || die "keine laufende Session."
+  count=$(session_count "$dir")
+  ((count > 0)) || die "die Session hat keine Shots."
+
+  file=$(jq -r '.shots[-1].file' "$dir/session.json")
+  local tmp_json
+  tmp_json=$(mktemp)
+  jq '.shots |= .[0:-1]' "$dir/session.json" >"$tmp_json" && mv "$tmp_json" "$dir/session.json"
+  rm -f "$dir/$file"
+  notify "Shot $count entfernt" "$((count - 1)) verbleiben"
+  poke_widget
+  echo "$file entfernt"
+}
+
+cmd_list() {
+  need jq
+  local dir
+  dir=$(session_dir) || die "keine laufende Session."
+  jq -r '.shots[] | "\(.index)\t\(.width)x\(.height)\t\(.file)\t\(.comment)"' "$dir/session.json" \
+    | awk -F '\t' 'BEGIN{printf "%-4s %-12s %-28s %s\n","NR","GROESSE","DATEI","KOMMENTAR"}
+                   {printf "%-4s %-12s %-28s %s\n",$1,$2,$3,$4}'
+}
+
+cmd_status() {
+  local json=false dir count title
+  [[ ${1:-} == "--json" ]] && json=true
+
+  if dir=$(session_dir); then
+    count=$(session_count "$dir")
+    title=$(session_title "$dir")
+  else
+    dir=""; count=0; title=""
+  fi
+
+  if [[ $json == true ]]; then
+    jq -n --arg dir "$dir" --arg title "$title" --argjson count "${count:-0}" \
+      '{active: ($dir != ""), count: $count, title: $title, dir: $dir,
+        canAnnotate: ($count > 0)}'
+  elif [[ -n $dir ]]; then
+    echo "Session laeuft: $count Shot(s) in $dir"
+  else
+    echo "Keine laufende Session."
+  fi
+}
+
+cmd_cancel() {
+  local dir
+  dir=$(session_dir) || die "keine laufende Session."
+  local count
+  count=$(session_count "$dir")
+  rm -rf "$dir"
+  rm -f "$CURRENT_FILE"
+  notify "Session verworfen" "$count Shot(s) geloescht"
+  poke_widget
+  echo "verworfen: $dir"
+}
+
+# Zuletzt genutzte Zielordner, neueste zuerst, ohne Duplikate.
+remember_target() {
+  local target="$1" tmp
+  tmp=$(mktemp)
+  {
+    printf '%s\n' "$target"
+    [[ -f $RECENT_FILE ]] && grep -vxF "$target" "$RECENT_FILE"
+  } | head -n "$RECENT_MAX" >"$tmp"
+  mv "$tmp" "$RECENT_FILE"
+}
+
+target_options() {
+  local defaults=("${SHOTLINE_DEFAULT_TARGET:-}" "$HOME/Development" "$HOME/Projects" "$PWD")
+  {
+    [[ -f $RECENT_FILE ]] && cat "$RECENT_FILE"
+    printf '%s\n' "${defaults[@]}"
+  } | awk 'NF && !seen[$0]++'
+}
+
+cmd_finish() {
+  local target="" title="" open_after=false
+  while (($# > 0)); do
+    case "$1" in
+      --target) shift; target="${1:-}" ;;
+      --target=*) target="${1#--target=}" ;;
+      --title) shift; title="${1:-}" ;;
+      --title=*) title="${1#--title=}" ;;
+      --open) open_after=true ;;
+      *) die "unbekannte Option fuer finish: $1" ;;
+    esac
+    shift
+  done
+
+  need jq
+  local dir count
+  dir=$(session_dir) || die "keine laufende Session."
+  count=$(session_count "$dir")
+  ((count > 0)) || die "die Session hat keine Shots. Nutze cancel."
+
+  [[ -n $title ]] || title=$(session_title "$dir")
+  if [[ -z $title ]]; then
+    title=$(ask_text "Titel dieser Screenshot-Serie") || title=""
+  fi
+  [[ -n $title ]] || title="Screenshots"
+
+  if [[ -z $target ]]; then
+    local options=() choice
+    mapfile -t options < <(target_options)
+    options+=("Anderen Ordner eingeben...")
+    choice=$(ask_select "Wohin soll die Serie? (Agent-Verzeichnis)" "${options[@]}") \
+      || die "abgebrochen. Die Session bleibt erhalten."
+    if [[ $choice == "Anderen Ordner eingeben..." ]]; then
+      choice=$(ask_text "Pfad zum Zielverzeichnis") || die "abgebrochen."
+    fi
+    target="$choice"
+  fi
+
+  target="${target/#\~/$HOME}"
+  [[ -n $target ]] || die "kein Zielverzeichnis."
+  mkdir -p "$target" || die "kann $target nicht anlegen"
+  # Ein relativer Pfad waere im Agenten-Prompt wertlos: der Agent kennt das
+  # Arbeitsverzeichnis nicht, aus dem der Screenshot-Tracker lief.
+  target=$(cd "$target" && pwd) || die "kann $target nicht aufloesen"
+
+  local slug folder result suffix
+  slug=$(slugify "$title")
+  folder="shotline-$(date +'%Y-%m-%d')"
+  [[ -n $slug ]] && folder="$folder-$slug"
+  result="$target/$folder"
+  suffix=2
+  while [[ -e $result ]]; do
+    result="$target/$folder-$suffix"
+    ((suffix++))
+  done
+
+  local tmp_json
+  tmp_json=$(mktemp)
+  jq --arg title "$title" '.title = $title' "$dir/session.json" >"$tmp_json" \
+    && mv "$tmp_json" "$dir/session.json"
+
+  "$PYTHON" "$RENDERER" "$dir" >/dev/null || die "Rendern fehlgeschlagen."
+
+  # Erst kopieren, dann die Quelle loeschen: ein Fehler auf halbem Weg darf
+  # die Aufnahmen nicht vernichten.
+  mkdir -p "$result" || die "kann $result nicht anlegen"
+  cp -a "$dir/." "$result/" || die "konnte nicht nach $result kopieren"
+  rm -f "$result/session.json"
+  rm -rf "$dir"
+  rm -f "$CURRENT_FILE"
+  printf '%s' "$result" >"$LAST_RESULT_FILE"
+  remember_target "$target"
+
+  local prompt noun="Screenshots" verb="liegen"
+  ((count == 1)) && { noun="Screenshot"; verb="liegt"; }
+  prompt="Sieh dir $result/session.md an. Dort $verb $count $noun dieser App in der \
+Reihenfolge der Bedienschritte, jeder mit meinem Kommentar. Die PNG-Dateien liegen im selben \
+Ordner; oeffne sie, wenn ein Kommentar allein nicht reicht. Arbeite die Kommentare als \
+Aufgabenliste ab und frage nach, bevor du raetst."
+
+  command -v wl-copy >/dev/null 2>&1 && printf '%s' "$prompt" | wl-copy 2>/dev/null
+  notify "Serie abgelegt: $count Shots" "$result -- Prompt liegt in der Zwischenablage"
+  poke_widget
+
+  echo "$result"
+  echo
+  echo "Prompt fuer den Agenten (liegt in der Zwischenablage):"
+  echo
+  echo "$prompt"
+
+  if [[ $open_after == true ]]; then
+    if command -v omarchy-launch-browser >/dev/null 2>&1; then
+      omarchy-launch-browser "file://$result/session.html" >/dev/null 2>&1 &
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$result/session.html" >/dev/null 2>&1 &
+    fi
+  fi
+}
+
+cmd_prompt() {
+  [[ -s $LAST_RESULT_FILE ]] || die "noch keine Serie abgeschlossen."
+  local result count
+  result=$(<"$LAST_RESULT_FILE")
+  count=$(find "$result" -maxdepth 1 -name '*.png' 2>/dev/null | wc -l)
+  local noun="Screenshots" verb="liegen"
+  ((count == 1)) && { noun="Screenshot"; verb="liegt"; }
+  local prompt="Sieh dir $result/session.md an. Dort $verb $count $noun dieser App in der \
+Reihenfolge der Bedienschritte, jeder mit meinem Kommentar."
+  command -v wl-copy >/dev/null 2>&1 && printf '%s' "$prompt" | wl-copy 2>/dev/null
+  echo "$prompt"
+}
+
+cmd_open() {
+  [[ -s $LAST_RESULT_FILE ]] || die "noch keine Serie abgeschlossen."
+  local result
+  result=$(<"$LAST_RESULT_FILE")
+  if command -v omarchy-launch-browser >/dev/null 2>&1; then
+    omarchy-launch-browser "file://$result/session.html" >/dev/null 2>&1 &
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$result/session.html" >/dev/null 2>&1 &
+  else
+    echo "$result/session.html"
+  fi
+}
+
+usage() {
+  cat <<USAGE
+shotline $VERSION -- Screenshots schrittweise sammeln und kommentieren
+
+  start [titel]            Neue Session starten
+  shot [--comment TEXT]    Ausschnitt waehlen, aufnehmen, kommentieren
+  annotate [--blur] [--index N]
+                           Shot im Editor markieren, danach Kommentar nachziehen
+  menu                     Kleines Menue mit allen Aktionen
+  undo                     Letzten Shot verwerfen
+  list                     Shots der laufenden Session zeigen
+  status [--json]          Zustand (auch fuer das Bar-Widget)
+  finish [--target DIR] [--title T] [--open]
+                           Serie rendern, ablegen und Agenten-Prompt liefern
+  cancel                   Laufende Session verwerfen
+  prompt                   Agenten-Prompt der letzten Serie erneut ausgeben
+  open                     session.html der letzten Serie oeffnen
+USAGE
+}
+
+# --------------------------------------------------------------------- main
+
+mkdir -p "$STATE_DIR" "$SESSIONS_DIR" || die "kann $STATE_DIR nicht anlegen"
+
+command="${1:-shot}"
+(($# > 0)) && shift
+
+case "$command" in
+  start) cmd_start "$@" ;;
+  shot | take) cmd_shot "$@" ;;
+  annotate | mark) cmd_annotate "$@" ;;
+  menu) cmd_menu "$@" ;;
+  undo) cmd_undo "$@" ;;
+  list) cmd_list "$@" ;;
+  status) cmd_status "$@" ;;
+  finish | done) cmd_finish "$@" ;;
+  cancel | abort) cmd_cancel "$@" ;;
+  prompt) cmd_prompt "$@" ;;
+  open) cmd_open "$@" ;;
+  version | --version) echo "$VERSION" ;;
+  help | --help | -h) usage ;;
+  *) usage >&2; exit 2 ;;
+esac
