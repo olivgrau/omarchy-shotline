@@ -104,6 +104,7 @@ Ohne Befehl nimmt die CLI einen Shot auf. Läuft keine Session, startet sie eine
 | `SHOTLINE_DEFAULT_TARGET` | Zielordner, der in der Auswahl oben steht |
 | `SHOTLINE_STATE_DIR` | Arbeitsverzeichnis (Standard: `~/.local/state/shotline`) |
 | `SHOTLINE_EDITOR` | Editor zum Markieren (Standard: `tensaku`) |
+| `SHOTLINE_QUIET` | auf `1` setzen, um alle Meldungen zu unterdruecken (Skripte, Aufnahmen) |
 
 Widget-Einstellungen (`omarchy bar set`): `hideWhenIdle`, `showCount`, `showPen`, `command`.
 

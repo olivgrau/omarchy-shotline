@@ -88,6 +88,26 @@ cat >"$STUBS/notify-send" <<'STUB'
 echo "$*" >>"${STUB_NOTIFY:-/dev/null}"
 STUB
 
+# Diese Omarchy-Befehle liegen in /usr/bin und waeren aus dem Test heraus
+# erreichbar. Ohne Stubs wuerde der Test echte Benachrichtigungen schicken,
+# mit der laufenden Shell reden oder einen Browser oeffnen.
+cat >"$STUBS/omarchy-notification-send" <<'STUB'
+#!/bin/bash
+echo "$*" >>"${STUB_NOTIFY:-/dev/null}"
+STUB
+
+cat >"$STUBS/omarchy-shell" <<'STUB'
+#!/bin/bash
+echo "$*" >>"${STUB_SHELL_LOG:-/dev/null}"
+STUB
+
+for stub in omarchy-launch-browser xdg-open tensaku; do
+  cat >"$STUBS/$stub" <<'STUB'
+#!/bin/bash
+echo "$0 $*" >>"${STUB_OPEN_LOG:-/dev/null}"
+STUB
+done
+
 chmod +x "$STUBS"/*
 
 export PATH="$STUBS:/usr/bin:/bin"
@@ -420,6 +440,25 @@ target="${!#}"
 printf '\x89PNG\r\n\x1a\n' >"$target"
 STUB
 chmod +x "$STUBS/grim"
+
+echo
+echo "Stiller Modus"
+fresh
+export SHOTLINE_GEOMETRY="0,0 100x100"
+: >"$STUB_NOTIFY"
+run shot --comment "Mit Meldung" >/dev/null
+check "normal meldet sich das Werkzeug" '[[ -s "$STUB_NOTIFY" ]]'
+: >"$STUB_NOTIFY"
+SHOTLINE_QUIET=1 "$CLI" shot --comment "Ohne Meldung" >/dev/null 2>&1
+check "SHOTLINE_QUIET unterdrueckt Meldungen" '[[ ! -s "$STUB_NOTIFY" ]]'
+dir=$(jq -r .dir <<<"$(run status --json)")
+check "stiller Modus nimmt trotzdem auf" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
+
+export STUB_SHELL_LOG="$WORK/shell.log"
+: >"$STUB_SHELL_LOG"
+run shot --comment "Widget stupsen" >/dev/null
+contains "das Bar-Widget wird angestupst" "$(cat "$STUB_SHELL_LOG")" "olivgrau.shotline refresh"
+unset STUB_SHELL_LOG
 
 echo
 echo "Namen und Pfade"

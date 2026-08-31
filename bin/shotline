@@ -48,6 +48,8 @@ need() {
 }
 
 notify() {
+  # Fuer Skripte und Aufnahmen: SHOTLINE_QUIET=1 unterdrueckt jede Meldung.
+  [[ -n ${SHOTLINE_QUIET:-} ]] && return 0
   local title="$1" body="${2:-}"
   if command -v omarchy-notification-send >/dev/null 2>&1; then
     omarchy-notification-send "$title" ${body:+"$body"} -t 2500 >/dev/null 2>&1 && return 0

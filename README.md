@@ -108,6 +108,7 @@ Without a command the CLI takes a shot. If no session is running, it starts one.
 | `SHOTLINE_DEFAULT_TARGET` | directory shown first in the target picker |
 | `SHOTLINE_STATE_DIR` | working directory (default: `~/.local/state/shotline`) |
 | `SHOTLINE_EDITOR` | annotation editor (default: `tensaku`) |
+| `SHOTLINE_QUIET` | set to `1` to suppress every notification (scripting, screen recordings) |
 
 Widget settings (`omarchy bar set`): `hideWhenIdle`, `showCount`, `showPen`,
 `command`.
