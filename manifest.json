@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "Oliver Graumnitz",
   "license": "MIT",
-  "description": "Schrittweise Screenshots mit Kommentar sammeln, markieren und als HTML plus Markdown fuer KI-Agenten ablegen",
+  "description": "Collect commented screenshots step by step and file them as HTML plus Markdown for AI agents",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Shotline",
-    "description": "Laufende Screenshot-Session: Zaehler, Klick nimmt auf, Stift markiert, Rechtsklick oeffnet das Menue",
+    "description": "Running screenshot session: counter, click captures, pen annotates, right click opens the menu",
     "category": "Utilities",
     "allowMultiple": false,
     "defaultSection": "right",
@@ -27,22 +27,22 @@
       {
         "key": "hideWhenIdle",
         "type": "bool",
-        "label": "Nur anzeigen, wenn eine Session laeuft"
+        "label": "Only show while a session is running"
       },
       {
         "key": "showCount",
         "type": "bool",
-        "label": "Anzahl der Shots neben dem Symbol zeigen"
+        "label": "Show the shot count next to the icon"
       },
       {
         "key": "showPen",
         "type": "bool",
-        "label": "Stift-Symbol zum Markieren zeigen"
+        "label": "Show the pen icon for annotating"
       },
       {
         "key": "command",
         "type": "string",
-        "label": "Pfad zur CLI (leer = mitgelieferte)"
+        "label": "Path to the CLI (empty = bundled one)"
       }
     ]
   }

@@ -1,7 +1,5 @@
 # Shotline
 
-*[Deutsche Fassung](README.de.md)*
-
 An Omarchy plugin that captures a walkthrough of an app one step at a time.
 Every screenshot gets a comment right after you take it, optional pen or blur
 annotations, and the finished series lands in an agent directory as HTML plus
@@ -108,7 +106,7 @@ Without a command the CLI takes a shot. If no session is running, it starts one.
 | `SHOTLINE_DEFAULT_TARGET` | directory shown first in the target picker |
 | `SHOTLINE_STATE_DIR` | working directory (default: `~/.local/state/shotline`) |
 | `SHOTLINE_EDITOR` | annotation editor (default: `tensaku`) |
-| `SHOTLINE_QUIET` | set to `1` to suppress every notification (scripting, screen recordings) |
+| `SHOTLINE_QUIET` | set to `1` to mute every notification (scripting, screen recordings) |
 
 Widget settings (`omarchy bar set`): `hideWhenIdle`, `showCount`, `showPen`,
 `command`.
@@ -133,7 +131,7 @@ afterwards, so a failure along the way cannot destroy captures.
 ./test/run-all.sh
 ```
 
-119 tests for the CLI, 26 for the renderer. The Bash test replaces `slurp`,
+123 tests for the CLI, 26 for the renderer. The Bash test replaces `slurp`,
 `grim`, `hyprctl`, the editor and the dialogs with stubs. It runs without a
 Wayland session and never opens a window.
 

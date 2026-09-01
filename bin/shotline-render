@@ -1,12 +1,11 @@
 #!/usr/bin/env python
-"""Rendert eine Screenshot-Session als HTML und Markdown.
+"""Render a screenshot session as HTML and Markdown.
 
-Aufruf:  shotline-render <session-verzeichnis>
+Usage:  shotline-render <session-directory>
 
-Liest session.json im Verzeichnis und schreibt session.html und session.md
-daneben. Die Bildpfade bleiben relativ, damit der ganze Ordner verschiebbar
-bleibt. Das Markdown ist die Fassung fuer den KI-Agenten, das HTML die
-Fassung zum Ansehen.
+Reads session.json in the directory and writes session.html and session.md
+next to it. Image paths stay relative so the whole folder can be moved. The
+Markdown is the version for the AI agent, the HTML the one to look at.
 """
 
 import html
@@ -18,30 +17,30 @@ from datetime import datetime
 SCHEMA = 1
 
 
-# --------------------------------------------------------------- laden
+# --------------------------------------------------------------- loading
 
 def load_session(session_dir):
     path = os.path.join(session_dir, "session.json")
     with open(path, encoding="utf-8") as handle:
         data = json.load(handle)
     if data.get("schema") != SCHEMA:
-        raise ValueError("unbekannte Schema-Version: %r" % data.get("schema"))
+        raise ValueError("unknown schema version: %r" % data.get("schema"))
     data.setdefault("shots", [])
-    data.setdefault("title", "Screenshot-Session")
+    data.setdefault("title", "Screenshot session")
     data.setdefault("id", "")
     data.setdefault("created", "")
     return data
 
 
 def fmt_time(iso, with_date=True):
-    """ISO-Zeitstempel in deutsche Schreibweise. Unlesbares bleibt unveraendert."""
+    """ISO timestamp in a readable form. Anything unparsable is left alone."""
     if not iso:
         return ""
     try:
         stamp = datetime.fromisoformat(iso)
     except ValueError:
         return iso
-    return stamp.strftime("%d.%m.%Y um %H:%M") if with_date else stamp.strftime("%H:%M:%S")
+    return stamp.strftime("%d %B %Y at %H:%M") if with_date else stamp.strftime("%H:%M:%S")
 
 
 def shot_label(shot, index):
@@ -51,12 +50,12 @@ def shot_label(shot, index):
         if len(first) > 70:
             first = first[:67].rstrip() + "..."
         return first
-    return "Schritt %d" % index
+    return "Step %d" % index
 
 
 def size_line(shot):
-    """Groesse des Ausschnitts. Auf HiDPI-Schirmen hat das PNG mehr Pixel als
-    die Auswahl logisch breit war; dann steht beides da."""
+    """Size of the region. On HiDPI screens the PNG holds more pixels than the
+    selection was wide in logical terms; then both are shown."""
     width = shot.get("width")
     height = shot.get("height")
     if not width or not height:
@@ -65,7 +64,7 @@ def size_line(shot):
     pixel_width = shot.get("pixelWidth")
     pixel_height = shot.get("pixelHeight")
     if pixel_width and pixel_height and (pixel_width != width or pixel_height != height):
-        text += " (Bild: %sx%s px)" % (pixel_width, pixel_height)
+        text += " (image: %sx%s px)" % (pixel_width, pixel_height)
     return text
 
 
@@ -82,50 +81,50 @@ def window_line(shot):
 def render_markdown(data, session_dir):
     shots = data["shots"]
     lines = []
-    lines.append("# Screenshot-Session: %s" % data["title"])
+    lines.append("# Screenshot walkthrough: %s" % data["title"])
     lines.append("")
     created = fmt_time(data.get("created"))
     count = len(shots)
-    noun = "Screenshot" if count == 1 else "Screenshots"
-    intro = "%d %s mit Kommentar." % (count, noun)
+    noun = "screenshot" if count == 1 else "screenshots"
+    intro = "%d commented %s." % (count, noun)
     if created:
-        intro = "Aufgenommen am %s. %s" % (created, intro)
+        intro = "Captured on %s. %s" % (created, intro)
     lines.append(intro)
     lines.append("")
-    lines.append("Die PNG-Dateien liegen im selben Verzeichnis wie diese Datei. "
-                 "Die Reihenfolge der Abschnitte ist die Reihenfolge der Bedienschritte. "
-                 "Oeffne ein Bild, wenn der Kommentar allein nicht reicht.")
+    lines.append("The PNG files sit in the same directory as this file. The order of the "
+                 "sections is the order the steps were taken in. Open an image when the "
+                 "comment alone is not enough.")
     lines.append("")
 
     if not shots:
-        lines.append("Diese Session enthaelt keine Screenshots.")
+        lines.append("This session contains no screenshots.")
         lines.append("")
     for index, shot in enumerate(shots, start=1):
         lines.append("## %d. %s" % (index, shot_label(shot, index)))
         lines.append("")
-        lines.append("![Schritt %d](%s)" % (index, shot.get("file", "")))
+        lines.append("![Step %d](%s)" % (index, shot.get("file", "")))
         lines.append("")
-        lines.append("- Datei: `%s`" % shot.get("file", ""))
+        lines.append("- File: `%s`" % shot.get("file", ""))
         size = size_line(shot)
         if size:
-            lines.append("- Ausschnitt: %s" % size)
+            lines.append("- Region: %s" % size)
         window = window_line(shot)
         if window:
-            lines.append("- Fenster: %s" % window)
+            lines.append("- Window: %s" % window)
         if shot.get("annotated"):
-            lines.append("- Im Bild markiert: die Hervorhebungen gehoeren zum Kommentar")
+            lines.append("- Annotated: the highlights are part of the comment")
         taken = fmt_time(shot.get("taken"), with_date=False)
         if taken:
-            lines.append("- Zeit: %s" % taken)
+            lines.append("- Time: %s" % taken)
         lines.append("")
         comment = (shot.get("comment") or "").strip()
         if comment:
-            lines.append("Kommentar:")
+            lines.append("Comment:")
             lines.append("")
             for row in comment.splitlines():
                 lines.append("> %s" % row)
         else:
-            lines.append("Kommentar: keiner")
+            lines.append("Comment: none")
         lines.append("")
 
     text = "\n".join(lines).rstrip() + "\n"
@@ -219,9 +218,9 @@ def render_html(data, session_dir):
     parts.append("  <header>")
     parts.append("    <div>")
     parts.append("      <h1>%s</h1>" % esc(data["title"]))
-    meta = "%d Screenshot%s" % (count, "" if count == 1 else "s")
+    meta = "%d screenshot%s" % (count, "" if count == 1 else "s")
     if created:
-        meta += " &middot; aufgenommen am %s" % esc(created)
+        meta += " &middot; captured on %s" % esc(created)
     parts.append('      <p class="meta">%s</p>' % meta)
     parts.append("    </div>")
     parts.append('    <div class="toolbar">')
@@ -230,12 +229,12 @@ def render_html(data, session_dir):
                  'title="Hell/Dunkel umschalten" aria-label="Theme">&#9788;</button>')
     parts.append("    </div>")
     parts.append("  </header>")
-    parts.append('  <p class="hint">Diese Seite fasst die Schritte in der Reihenfolge der Aufnahme '
-                 'zusammen. Fuer einen KI-Agenten liegt dieselbe Information als '
-                 '<code>session.md</code> daneben.</p>')
+    parts.append('  <p class="hint">This page lays out the steps in the order they were '
+                 'captured. The same information sits next to it as '
+                 '<code>session.md</code>, for an AI agent to read.</p>')
 
     if not shots:
-        parts.append('  <div class="empty-state">Diese Session enthaelt keine Screenshots.</div>')
+        parts.append('  <div class="empty-state">This session contains no screenshots.</div>')
 
     for index, shot in enumerate(shots, start=1):
         comment = (shot.get("comment") or "").strip()
@@ -248,9 +247,9 @@ def render_html(data, session_dir):
         if comment:
             parts.append('      <p class="comment">%s</p>' % esc(comment))
         else:
-            parts.append('      <p class="comment empty">Kein Kommentar hinterlegt.</p>')
+            parts.append('      <p class="comment empty">No comment recorded.</p>')
         parts.append("      <figure>")
-        parts.append('        <img src="%s" alt="Schritt %d: %s" loading="lazy">'
+        parts.append('        <img src="%s" alt="Step %d: %s" loading="lazy">'
                      % (esc(shot.get("file", "")), index, esc(shot_label(shot, index))))
         parts.append("        <figcaption>%s</figcaption>" % esc(shot.get("file", "")))
         parts.append("      </figure>")
@@ -262,7 +261,7 @@ def render_html(data, session_dir):
         if window:
             facts.append(window)
         if shot.get("annotated"):
-            facts.append("im Bild markiert")
+            facts.append("annotated")
         taken = fmt_time(shot.get("taken"), with_date=False)
         if taken:
             facts.append(taken)
@@ -274,7 +273,7 @@ def render_html(data, session_dir):
         parts.append("    </div>")
         parts.append("  </section>")
 
-    parts.append("  <footer>Erzeugt vom Omarchy-Plugin Shotline.</footer>")
+    parts.append("  <footer>Generated by Shotline, an Omarchy plugin.</footer>")
     parts.append("</div>")
     parts.append("<script>%s</script>" % SCRIPT)
     parts.append("</body>")
@@ -291,11 +290,11 @@ def render_html(data, session_dir):
 
 def main(argv):
     if len(argv) != 2:
-        sys.stderr.write("Aufruf: shotline-render <session-verzeichnis>\n")
+        sys.stderr.write("Usage: shotline-render <session-directory>\n")
         return 2
     session_dir = argv[1]
     if not os.path.isdir(session_dir):
-        sys.stderr.write("Verzeichnis nicht gefunden: %s\n" % session_dir)
+        sys.stderr.write("Directory not found: %s\n" % session_dir)
         return 1
     data = load_session(session_dir)
     html_path = render_html(data, session_dir)

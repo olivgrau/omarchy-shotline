@@ -1,13 +1,13 @@
 #!/bin/bash
-# shotline -- Installer fuer Omarchy.
+# shotline -- installer for Omarchy.
 #
-#   ./install.sh            installiert alles
-#   ./install.sh uninstall  entfernt alles wieder
+#   ./install.sh            install everything
+#   ./install.sh uninstall  remove everything it added
 #
-# Der Installer fasst nur eigene Dateien und einen klar markierten Block in
-# bindings.lua an. Ein uninstall stellt den vorherigen Zustand her.
+# The installer only touches its own files and one clearly marked block in
+# bindings.lua. An uninstall restores the previous state.
 #
-# Tasten lassen sich beim Aufruf ueberschreiben:
+# Keys can be overridden on the command line:
 #   SHOT_KEY="SUPER + SHIFT + P" ./install.sh
 
 set -euo pipefail
@@ -55,61 +55,61 @@ append_block() {
 # --------------------------------------------------------------- uninstall
 
 if [[ $ACTION == "uninstall" ]]; then
-  say "entferne den Starter"
+  say "removing the launcher"
   rm -f "$BIN_DIR/shotline" "$BIN_DIR/shotline-render"
 
   if [[ -e $PLUGIN_DIR ]]; then
-    say "entferne das Shell-Plugin"
+    say "removing the shell plugin"
     omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
     rm -rf "$PLUGIN_DIR"
     omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
   fi
 
-  say "setze die Tastenbelegung zurueck"
+  say "reverting the key bindings"
   strip_block "$HYPR_BINDINGS"
   hyprctl reload >/dev/null 2>&1 || true
 
-  say "shotline entfernt. Aufgenommene Serien bleiben liegen."
+  say "shotline removed. Captured series are left untouched."
   exit 0
 fi
 
 # ----------------------------------------------------------------- install
 
 for tool in grim slurp jq python; do
-  command -v "$tool" >/dev/null 2>&1 || { warn "$tool fehlt. Bitte zuerst installieren."; exit 1; }
+  command -v "$tool" >/dev/null 2>&1 || { warn "$tool is missing. Please install it first."; exit 1; }
 done
-command -v hyprpicker >/dev/null 2>&1 || warn "hyprpicker fehlt: der Bildschirm friert waehrend der Auswahl nicht ein."
+command -v hyprpicker >/dev/null 2>&1 || warn "hyprpicker is missing: the screen will not freeze during selection."
 command -v "${SHOTLINE_EDITOR:-tensaku}" >/dev/null 2>&1 \
-  || warn "tensaku fehlt: Markieren und Unkenntlichmachen stehen nicht zur Verfuegung."
+  || warn "tensaku is missing: annotating and blurring will not be available."
 
-say "verlinke die CLI nach $BIN_DIR"
+say "linking the CLI into $BIN_DIR"
 mkdir -p "$BIN_DIR"
 ln -sfn "$ROOT/bin/shotline" "$BIN_DIR/shotline"
 ln -sfn "$ROOT/bin/shotline-render" "$BIN_DIR/shotline-render"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *) warn "$BIN_DIR liegt nicht im PATH. Die Tastenkuerzel nutzen den vollen Pfad, das genuegt." ;;
+  *) warn "$BIN_DIR is not on PATH. The key bindings use the full path, so that is fine." ;;
 esac
 
-say "installiere das Shell-Plugin ($PLUGIN_ID)"
+say "installing the shell plugin ($PLUGIN_ID)"
 mkdir -p "$HOME/.config/omarchy/plugins"
 rm -rf "$PLUGIN_DIR"
-# Das Repo-Wurzelverzeichnis ist das Plugin-Verzeichnis: manifest.json liegt
-# hier. Der Symlink laesst Aenderungen im Repo sofort in omarchy-shell wirken.
+# The repo root is the plugin directory: manifest.json lives here. The symlink
+# lets changes in the repo take effect in omarchy-shell right away.
 ln -sfn "$ROOT" "$PLUGIN_DIR"
 
 if command -v omarchy-plugin-validate >/dev/null 2>&1; then
-  omarchy-plugin-validate "$ROOT" >/dev/null || { warn "manifest.json ist ungueltig"; exit 1; }
+  omarchy-plugin-validate "$ROOT" >/dev/null || { warn "manifest.json is invalid"; exit 1; }
 fi
 
 if command -v omarchy-shell >/dev/null 2>&1; then
-  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || warn "konnte die Plugins nicht neu einlesen"
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || warn "could not rescan the plugins"
   omarchy plugin enable "$PLUGIN_ID" >/dev/null 2>&1 \
-    || warn "aktiviere es selbst: omarchy plugin enable $PLUGIN_ID"
+    || warn "enable it yourself: omarchy plugin enable $PLUGIN_ID"
 fi
 
-# Belegte Tasten meldet der Installer, statt sie stillschweigend zu ueberschreiben.
+# The installer reports taken keys instead of silently overriding them.
 check_key() {
   local key="$1" name="$2" mods=0 last
   command -v hyprctl >/dev/null 2>&1 || return 0
@@ -126,7 +126,7 @@ check_key() {
   if hyprctl binds -j 2>/dev/null \
      | jq -e --argjson m "$mods" --arg k "${last^^}" \
        '.[] | select(.modmask == $m and (.key | ascii_upcase) == $k)' >/dev/null 2>&1; then
-    warn "$key ist bereits belegt ($name). Setze eine andere Taste: ${name}=\"SUPER + SHIFT + ...\" ./install.sh"
+    warn "$key is already taken ($name). Pick another: ${name}=\"SUPER + SHIFT + ...\" ./install.sh"
   fi
 }
 
@@ -136,30 +136,30 @@ check_key "$UNDO_KEY" UNDO_KEY
 check_key "$MARK_KEY" MARK_KEY
 check_key "$MENU_KEY" MENU_KEY
 
-say "traegt die Tastenkuerzel in bindings.lua ein"
+say "writing the key bindings into bindings.lua"
 mkdir -p "$(dirname "$HYPR_BINDINGS")"
 touch "$HYPR_BINDINGS"
 append_block "$HYPR_BINDINGS" "$(cat <<BINDINGS
-o.bind("$SHOT_KEY", "Shotline: Shot", "$BIN_DIR/shotline shot")
-o.bind("$FINISH_KEY", "Shotline: Serie abschliessen", "$BIN_DIR/shotline finish --open")
-o.bind("$UNDO_KEY", "Shotline: letzten Shot verwerfen", "$BIN_DIR/shotline undo")
-o.bind("$MARK_KEY", "Shotline: letzten Shot markieren", "$BIN_DIR/shotline annotate")
-o.bind("$MENU_KEY", "Shotline: Menue", "$BIN_DIR/shotline menu")
+o.bind("$SHOT_KEY", "Shotline: shot", "$BIN_DIR/shotline shot")
+o.bind("$FINISH_KEY", "Shotline: finish series", "$BIN_DIR/shotline finish --open")
+o.bind("$UNDO_KEY", "Shotline: discard last shot", "$BIN_DIR/shotline undo")
+o.bind("$MARK_KEY", "Shotline: annotate last shot", "$BIN_DIR/shotline annotate")
+o.bind("$MENU_KEY", "Shotline: menu", "$BIN_DIR/shotline menu")
 BINDINGS
 )"
 hyprctl reload >/dev/null 2>&1 || true
 
 cat <<DONE
 
-$(say "fertig")
+$(say "done")
 
-  $SHOT_KEY    naechsten Screenshot aufnehmen und kommentieren
-  $MARK_KEY    letzten Shot markieren (Stift, Blur), danach Kommentar
-  $UNDO_KEY    letzten Shot verwerfen
-  $MENU_KEY    Menue mit allen Aktionen
-  $FINISH_KEY  Serie ablegen, HTML oeffnen, Agenten-Prompt kopieren
+  $SHOT_KEY    capture the next screenshot and comment on it
+  $MARK_KEY    annotate the last shot (pen, blur), then the comment
+  $UNDO_KEY    discard the last shot
+  $MENU_KEY    menu with every action
+  $FINISH_KEY  file the series away, open the HTML, copy the agent prompt
 
-  Das Bar-Widget "Shotline" zeigt den Zaehler der laufenden Session.
-  Fehlt es in der Bar:  omarchy bar set
+  The bar widget "Shotline" shows the counter of the running session.
+  Missing from the bar?  omarchy bar set
 
 DONE

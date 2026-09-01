@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shotline</title>
+<style>
+:root{
+  --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d8dee4;
+  --text:#1c2128; --muted:#5b6672; --accent:#b8740f; --accent-bg:rgba(184,116,15,.10);
+  --ok:#1a7f37; --radius:12px; --shadow:0 1px 3px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.05);
+}
+html[data-theme="dark"]{
+  --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2b3440;
+  --text:#e6edf3; --muted:#9aa7b4; --accent:#f5a623; --accent-bg:rgba(245,166,35,.14);
+  --ok:#3fb950; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6;
+     background:var(--bg);color:var(--text);padding:2rem 1rem;-webkit-font-smoothing:antialiased}
+.container{max-width:960px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:.4rem}
+h1{font-size:1.8rem;font-weight:800;letter-spacing:-.4px}
+.sub{color:var(--muted);max-width:66ch;margin-bottom:2rem}
+.toggle{cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--text);
+        width:40px;height:40px;border-radius:10px;font-size:1.1rem;display:grid;place-items:center;flex:0 0 auto}
+.toggle:hover{background:var(--panel2)}
+h2{font-size:.95rem;font-weight:700;margin:2rem 0 .8rem;text-transform:uppercase;
+   letter-spacing:.6px;color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+       box-shadow:var(--shadow);overflow:hidden}
+.pad{padding:1.1rem 1.3rem}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.9rem}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+      padding:1rem 1.1rem;box-shadow:var(--shadow);position:relative}
+.step .n{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;
+         background:var(--accent-bg);color:var(--accent);font-weight:800;font-size:.85rem;margin-bottom:.5rem}
+.step h3{font-size:.98rem;font-weight:700;margin-bottom:.25rem}
+.step p{color:var(--muted);font-size:.88rem;line-height:1.5}
+kbd{font-family:ui-monospace,"JetBrains Mono",monospace;font-size:.8rem;background:var(--panel2);
+    border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:.1rem .4rem;white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th,td{padding:.6rem .9rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.4px}
+tr:last-child td{border-bottom:none}
+code{font-family:ui-monospace,"JetBrains Mono",monospace;font-size:.86em;
+     background:var(--panel2);border-radius:5px;padding:.1rem .35rem}
+pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:.9rem 1.1rem;
+    overflow-x:auto;font-family:ui-monospace,"JetBrains Mono",monospace;font-size:.84rem;line-height:1.5}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.9rem}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+      padding:.9rem 1.1rem;box-shadow:var(--shadow)}
+.stat .v{font-size:1.6rem;font-weight:800;color:var(--ok);font-variant-numeric:tabular-nums}
+.stat .l{color:var(--muted);font-size:.82rem}
+ul.notes{list-style:none}
+ul.notes li{padding:.55rem 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:.9rem}
+ul.notes li:last-child{border-bottom:none}
+ul.notes b{color:var(--text);font-weight:650}
+footer{color:var(--muted);font-size:.8rem;margin-top:2.5rem;text-align:center}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div>
+      <h1>Shotline</h1>
+    </div>
+    <button class="toggle" onclick="toggleTheme()" title="Toggle light/dark" aria-label="Theme">&#9788;</button>
+  </header>
+  <p class="sub">An Omarchy plugin. It captures a walkthrough of an app one step at a time,
+  comments every step right away and files the series into an agent directory as HTML plus
+  Markdown. The matching prompt for the AI agent ends up in the clipboard.</p>
+
+  <h2>Workflow</h2>
+  <div class="flow">
+    <div class="step">
+      <span class="n">1</span>
+      <h3>Pick a region</h3>
+      <p><kbd>SUPER + SHIFT + K</kbd> freezes the screen. The size of the selection sits in
+      the frame while you drag. A click grabs the whole window. <kbd>Tab</kbd> cycles through
+      windows, <kbd>Return</kbd> takes the highlighted one,
+      <kbd>Ctrl</kbd>+<kbd>Return</kbd> the whole screen.</p>
+    </div>
+    <div class="step">
+      <span class="n">2</span>
+      <h3>Type the comment</h3>
+      <p>An input field appears right away. The prompt carries the size of the region, so
+      there is no doubt about what you captured.</p>
+    </div>
+    <div class="step">
+      <span class="n">3</span>
+      <h3>Annotate if needed</h3>
+      <p>As soon as a shot exists, the pen shows up in the bar. One click opens the image in
+      the editor: the brush to highlight, blur to hide. Enter saves, and the comment dialog
+      comes back.</p>
+    </div>
+    <div class="step">
+      <span class="n">4</span>
+      <h3>Next step</h3>
+      <p>Back to the app, same key. The bar widget keeps the count.
+      <kbd>SUPER + SHIFT + U</kbd> discards the last shot.</p>
+    </div>
+    <div class="step">
+      <span class="n">5</span>
+      <h3>File it away</h3>
+      <p><kbd>SUPER + SHIFT + L</kbd> asks for title and target folder, renders the series
+      and puts the agent prompt into the clipboard.</p>
+    </div>
+  </div>
+
+  <h2>Bar widget and menu</h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>Icon</th><th>Left click</th><th>Middle click</th><th>Right click</th></tr></thead>
+      <tbody>
+        <tr><td><b>Camera</b><br><span style="color:var(--muted);font-size:.85em">with counter</span></td>
+            <td>next shot</td><td>discard last</td><td>menu</td></tr>
+        <tr><td><b>Pen</b><br><span style="color:var(--muted);font-size:.85em">only once a shot exists</span></td>
+            <td>annotate</td><td>menu</td><td>blur out</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel pad" style="margin-top:.9rem">
+    <p style="color:var(--muted);font-size:.9rem">The menu (<kbd>SUPER + SHIFT + I</kbd> or
+    right click) offers only what is possible right now: next shot, annotate last, blur out
+    last, discard last, finish series, discard series, open last result. It uses the Omarchy
+    menu dialog, so it follows the theme and is keyboard driven.</p>
+  </div>
+
+  <h2>Result in the agent directory</h2>
+  <div class="panel pad">
+<pre>&lt;agent-directory&gt;/shotline-2026-08-28-login-flow/
+  01-login-screen.png
+  02-error-after-submit.png
+  session.html    to look at, light/dark toggle
+  session.md      for the AI agent, relative image paths</pre>
+    <p style="margin-top:.9rem;color:var(--muted);font-size:.9rem">The clipboard prompt
+    points at <code>session.md</code>, states how many steps there are and tells the agent to
+    work through the comments as a task list.</p>
+  </div>
+
+  <h2>Keys</h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>Key</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><kbd>SUPER + SHIFT + K</kbd></td><td>capture the next screenshot and comment on it</td></tr>
+        <tr><td><kbd>SUPER + SHIFT + Z</kbd></td><td>annotate the last shot, then the comment</td></tr>
+        <tr><td><kbd>SUPER + SHIFT + U</kbd></td><td>discard the last shot</td></tr>
+        <tr><td><kbd>SUPER + SHIFT + I</kbd></td><td>menu with every action</td></tr>
+        <tr><td><kbd>SUPER + SHIFT + L</kbd></td><td>file the series away and copy the agent prompt</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Commands</h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>Command</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><code>shotline shot</code></td><td>Pick a region, capture, comment. Starts a session when needed.</td></tr>
+        <tr><td><code>shotline annotate [--blur]</code></td><td>Annotate or blur a shot in the editor, then update its comment.</td></tr>
+        <tr><td><code>shotline menu</code></td><td>Menu with every action, matching the current state.</td></tr>
+        <tr><td><code>shotline undo</code></td><td>Discard the last shot, image file included.</td></tr>
+        <tr><td><code>shotline list</code></td><td>Shots of the running session with size and comment.</td></tr>
+        <tr><td><code>shotline status --json</code></td><td>State for the bar widget.</td></tr>
+        <tr><td><code>shotline finish</code></td><td>Render, file away, hand over the prompt. Optional <code>--target</code>, <code>--title</code>, <code>--open</code>.</td></tr>
+        <tr><td><code>shotline cancel</code></td><td>Discard the session and its images.</td></tr>
+        <tr><td><code>shotline prompt</code></td><td>Print the last series&#39; prompt again.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Layout</h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>bin/shotline</code></td><td>CLI: session, capture, dialogs, hand-off. Bash.</td></tr>
+        <tr><td><code>bin/shotline-render</code></td><td>Renderer: <code>session.json</code> to HTML and Markdown. Python, standard library only.</td></tr>
+        <tr><td><code>BarWidget.qml</code></td><td>Bar widget with counter and pen.</td></tr>
+        <tr><td><code>manifest.json</code></td><td>Plugin manifest, schema 1, kind <code>bar-widget</code>.</td></tr>
+        <tr><td><code>install.sh</code></td><td>Symlinks, plugin registration, marked block in <code>bindings.lua</code>. <code>uninstall</code> reverts everything.</td></tr>
+        <tr><td><code>test/</code></td><td>Tests. They run without a Wayland session.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Tests</h2>
+  <div class="stats">
+    <div class="stat"><div class="v">26</div><div class="l">renderer tests (Python)</div></div>
+    <div class="stat"><div class="v">123</div><div class="l">CLI tests (Bash, end-to-end)</div></div>
+    <div class="stat"><div class="v">0</div><div class="l">failed</div></div>
+  </div>
+  <div class="panel pad" style="margin-top:.9rem">
+    <p style="color:var(--muted);font-size:.9rem"><code>./test/run-all.sh</code> replaces
+    <code>slurp</code>, <code>grim</code>, <code>hyprctl</code>, the editor and the dialogs with
+    stubs. The test never opens a window and runs without a Wayland session.</p>
+  </div>
+
+  <h2>What mattered while building it</h2>
+  <div class="panel pad">
+    <ul class="notes">
+      <li><b>HiDPI:</b> the selection measures logical pixels, the PNG holds more. Both sizes
+      end up in the result, because the image is what the agent sees.</li>
+      <li><b>Sleeping screen:</b> <code>grim</code> waits forever for a frame. The plugin wakes
+      the screen and gives up after 20 seconds with a clear message.</li>
+      <li><b>Hyprland with Lua:</b> <code>hyprctl dispatch dpms on</code> fails on Omarchy 4.
+      It takes <code>hyprctl eval 'hl.dispatch(hl.dsp.dpms("on"))'</code>, with a fallback to
+      the old form.</li>
+      <li><b>Not losing captures:</b> <code>finish</code> copies into the target first and
+      cleans up afterwards. A failure along the way destroys nothing.</li>
+      <li><b>Keyboard control:</b> Omarchy binds <kbd>Tab</kbd> and <kbd>Return</kbd> to slurp's
+      selection layer, no matter who started slurp. The keys leave nothing but a marker file and
+      end slurp; Shotline reads those markers and yields the same selection as the Omarchy
+      tool.</li>
+      <li><b>From the real test run:</b> four bugs only surfaced in practice: a relative target
+      path landed unresolved in the agent prompt, the prompt read "1 Screenshots", a shortened
+      file name ended in a hyphen, and window detection reached into other workspaces. All four
+      are fixed and covered by tests.</li>
+      <li><b>Bar glyphs:</b> Nerd Font characters belong in the QML file as
+      <code>"\uf030"</code>. As raw characters they do not survive a rewrite, and the button
+      stays empty.</li>
+      <li><b>Plugin reload:</b> the plugin hangs in the Omarchy plugin folder as a symlink. The
+      auto reload does not follow the symlink: after QML changes, run
+      <code>omarchy-restart-shell</code>.</li>
+      <li><b>Editor:</b> annotating uses <code>tensaku</code>, Omarchy's own screenshot editor.
+      It saves back into the same file. If it crops, the image size is measured again.</li>
+      <li><b>Choosing keys:</b> <kbd>SUPER + SHIFT + S</kbd>, <kbd>X</kbd> and <kbd>M</kbd> are
+      taken in Omarchy. The installer warns about conflicts and accepts your own keys.</li>
+    </ul>
+  </div>
+
+  <footer>Written while building the plugin. Repo: <code>~/Development/shotline</code></footer>
+</div>
+<script>
+var root=document.documentElement;
+try{ if(localStorage.getItem('shotline-theme')==='dark') root.setAttribute('data-theme','dark'); }catch(e){}
+function toggleTheme(){
+  var dark=root.getAttribute('data-theme')==='dark';
+  if(dark){ root.removeAttribute('data-theme'); try{localStorage.setItem('shotline-theme','light')}catch(e){} }
+  else { root.setAttribute('data-theme','dark'); try{localStorage.setItem('shotline-theme','dark')}catch(e){} }
+}
+</script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 #!/bin/bash
-# Baut das Kurzvideo fuer den X-Post aus den Screenshots.
-#   ./video/build.sh          -> video/shotline.mp4 und video/shotline.gif
-# Braucht ffmpeg und ImageMagick. Idempotent: raeumt seine Zwischendateien auf.
+# Builds the short video for the X post out of the screenshots.
+#   ./video/build.sh          -> video/shotline.mp4 and video/shotline.gif
+# Needs ffmpeg and ImageMagick. Idempotent: cleans up its own intermediates.
 
 set -euo pipefail
 
@@ -19,8 +19,8 @@ SANS_BOLD=$(fc-match -f '%{file}' 'Liberation Sans:bold')
 rm -rf "$WORK"; mkdir -p "$WORK"
 trap 'rm -rf "$WORK"' EXIT
 
-# Vollflaechige Textkarte.
-card() { # card <datei> <zeile1> <zeile2> <zeile3>
+# Full-bleed text card.
+card() { # card <file> <line1> <line2> <line3>
   magick -size 1280x720 "xc:$BG" \
     -font "$SANS_BOLD" -fill "$FG" -pointsize 62 -gravity center \
     -annotate +0-70 "$2" \
@@ -31,9 +31,9 @@ card() { # card <datei> <zeile1> <zeile2> <zeile3>
     "$1"
 }
 
-# Screenshot mit Bildunterschrift auf 1280x720. Das ">" haelt kleine Bilder
-# (etwa den Bar-Ausschnitt) in ihrer Groesse, statt sie unscharf aufzublasen.
-slide() { # slide <datei> <quelle> <text>
+# Screenshot with a caption on 1280x720. The ">" keeps small images (the bar
+# crop, for one) at their size instead of blowing them up into a blur.
+slide() { # slide <file> <source> <caption>
   magick "$2" -resize '1200x540>' -background "$BG" -gravity center -extent 1280x620 \
     -background "$BG" -gravity north -extent 1280x720 \
     -font "$SANS" -fill "$FG" -pointsize 32 -gravity south -annotate +0+48 "$3" \
@@ -65,11 +65,11 @@ done
 
 ffmpeg -loglevel error -y -f concat -safe 0 -i "$WORK/list.txt" -c copy "$HERE/shotline.mp4"
 
-# GIF fuer Stellen, die kein MP4 moegen.
-# Bewusst ohne palettegen/paletteuse: die Filterkette bricht bei diesem
-# Material reproduzierbar ab und liefert ein GIF mit nur wenigen Frames.
+# GIF for places that dislike MP4.
+# Deliberately without palettegen/paletteuse: on this material the filter
+# chain reproducibly breaks and yields a GIF with only a handful of frames.
 ffmpeg -loglevel error -y -i "$HERE/shotline.mp4" -vf "fps=8,scale=640:-2" -loop 0 "$HERE/shotline.gif"
 
-printf 'fertig:\n  %s (%s)\n  %s (%s)\n' \
+printf 'done:\n  %s (%s)\n  %s (%s)\n' \
   "$HERE/shotline.mp4" "$(du -h "$HERE/shotline.mp4" | cut -f1)" \
   "$HERE/shotline.gif" "$(du -h "$HERE/shotline.gif" | cut -f1)"

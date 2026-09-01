@@ -125,7 +125,3 @@ screen readers.
   #Hyprland #Linux` in a reply so they don't eat the hook.
 - **Worth tagging:** the Omarchy account, if you want it seen by that
   community. Don't tag more than one.
-- **One caveat:** `02-comment-dialog.png` shows the dialog in German
-  ("was passiert hier?"), because the CLI speaks German. If that bothers you
-  for an English thread, either drop that image or say the word and the UI
-  strings get translated.

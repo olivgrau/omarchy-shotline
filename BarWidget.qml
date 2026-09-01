@@ -4,17 +4,17 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// Shotline -- Bar-Widget.
+// Shotline -- bar widget.
 //
-// Zwei Symbole: die Kamera zeigt die laufende Session samt Zaehler, der Stift
-// erscheint erst, wenn ein Shot zum Markieren da ist. Ein Klick auf den Stift
-// oeffnet den Screenshot im Editor und fuehrt danach zurueck in den Kommentar.
+// Two icons: the camera shows the running session with its counter, the pen
+// only appears once there is a shot to annotate. Clicking the pen opens the
+// screenshot in the editor and leads back into the comment afterwards.
 //
-//   Kamera  links: naechster Shot   mitte: letzten verwerfen  rechts: Menue
-//   Stift   links: markieren        mitte: Menue              rechts: unkenntlich machen
+//   Camera  left: next shot      middle: discard last   right: menu
+//   Pen     left: annotate       middle: menu           right: blur out
 //
-// Der Zustand kommt aus `shotline status --json`; die CLI stupst das
-// Widget nach jeder Aenderung per IPC an, der Timer ist nur das Sicherheitsnetz.
+// State comes from `shotline status --json`; the CLI nudges the widget over
+// IPC after every change, the timer is only the safety net.
 BarWidget {
   id: root
   moduleName: "olivgrau.shotline"
@@ -28,13 +28,13 @@ BarWidget {
   readonly property bool showCount: setting("showCount", true)
   readonly property bool showPen: setting("showPen", true)
 
-  // Qt.resolvedUrl(".") ist das Verzeichnis dieser Datei. So findet das Widget
-  // die CLI im eigenen Plugin-Ordner, auch ohne Eintrag in $PATH.
+  // Qt.resolvedUrl(".") is this file's directory, so the widget finds the CLI
+  // inside its own plugin folder without needing it on $PATH.
   readonly property string pluginDir:
     Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "")
   readonly property string cli: setting("command", pluginDir + "bin/shotline")
 
-  // Nerd-Font-Glyphen: Kamera und Stift.
+  // Nerd Font glyphs: camera and pen.
   readonly property string cameraIcon: "\uf030"   // Kamera
   readonly property string penIcon: "\uf040"      // Stift
   readonly property string activeDot: "●"
@@ -106,8 +106,8 @@ BarWidget {
     onTriggered: if (!status.running) status.running = true
   }
 
-  // Nach einem Klick dauert Auswahl oder Editor beliebig lange. Ein kurzer
-  // Nachschlag faengt den Fall ab, dass die CLI ihren IPC-Stups nicht absetzt.
+  // After a click, the selection or the editor can take any amount of time. A
+  // short follow-up covers the case where the CLI never sends its IPC nudge.
   Timer {
     id: refreshSoon
     interval: 1500
@@ -141,9 +141,9 @@ BarWidget {
       horizontalMargin: 8.75
       verticalPadding: 8.75
       tooltipText: root.active
-        ? "Shotline\n" + root.count + " Shot(s)" + (root.title !== "" ? " -- " + root.title : "")
-          + "\nlinks: naechster Shot\nmitte: letzten verwerfen\nrechts: Menue"
-        : "Shotline\nkeine Session\nlinks: ersten Shot aufnehmen\nrechts: Menue"
+        ? "Shotline\n" + root.count + " shot(s)" + (root.title !== "" ? " -- " + root.title : "")
+          + "\nleft: next shot\nmiddle: discard last\nright: menu"
+        : "Shotline\nno session\nleft: take the first shot\nright: menu"
 
       onPressed: function (b) { root.pressCamera(b) }
     }
@@ -157,7 +157,7 @@ BarWidget {
       hasVisualContent: root.penVisible
       horizontalMargin: 7
       verticalPadding: 8.75
-      tooltipText: "Shot " + root.count + " markieren\nlinks: Stift\nrechts: unkenntlich machen\nmitte: Menue"
+      tooltipText: "Annotate shot " + root.count + "\nleft: pen\nright: blur out\nmiddle: menu"
 
       onPressed: function (b) { root.pressPen(b) }
     }

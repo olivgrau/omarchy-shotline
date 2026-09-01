@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# End-to-End-Test der CLI. Alle Aussenkontakte (slurp, grim, hyprctl,
-# Dialoge, Zwischenablage, Notification) sind Stubs im PATH, damit der Test
-# ohne Wayland-Sitzung laeuft und nie ein echtes Fenster oeffnet.
+# End-to-end test of the CLI. Every outside contact (slurp, grim, hyprctl,
+# dialogs, clipboard, notifications) is a stub on PATH, so the test runs
+# without a Wayland session and never opens a real window.
 
 set -uo pipefail
 
@@ -37,10 +37,10 @@ cat >"$STUBS/slurp" <<'STUB'
 echo "$STUB_SLURP_OUTPUT"
 STUB
 
-# Schreibt eine minimale, gueltige PNG-Datei an den Zielpfad.
+# Writes a minimal, valid PNG file to the target path.
 cat >"$STUBS/grim" <<'STUB'
 #!/bin/bash
-# Nur die PNG-Signatur, kein IHDR: so testet der Fall ohne echte Bildgroesse.
+# Only the PNG signature, no IHDR: this covers the case without a real image size.
 target="${!#}"
 printf '\x89PNG\r\n\x1a\n' >"$target"
 STUB
@@ -72,7 +72,7 @@ STUB
 
 cat >"$STUBS/omarchy-menu-select" <<'STUB'
 #!/bin/bash
-# Der echte Dialog gibt das Label ohne fuehrendes Symbol zurueck.
+# The real dialog returns the label without its leading icon.
 cat >"${STUB_SELECT_LOG:-/dev/null}"
 [[ -n ${STUB_SELECT:-} ]] || exit 1
 echo "$STUB_SELECT"
@@ -88,9 +88,9 @@ cat >"$STUBS/notify-send" <<'STUB'
 echo "$*" >>"${STUB_NOTIFY:-/dev/null}"
 STUB
 
-# Diese Omarchy-Befehle liegen in /usr/bin und waeren aus dem Test heraus
-# erreichbar. Ohne Stubs wuerde der Test echte Benachrichtigungen schicken,
-# mit der laufenden Shell reden oder einen Browser oeffnen.
+# These Omarchy commands live in /usr/bin and would be reachable from inside
+# the test. Without stubs the test would send real notifications, talk to the
+# running shell, or open a browser.
 cat >"$STUBS/omarchy-notification-send" <<'STUB'
 #!/bin/bash
 echo "$*" >>"${STUB_NOTIFY:-/dev/null}"
@@ -114,7 +114,7 @@ export PATH="$STUBS:/usr/bin:/bin"
 export STUB_CLIPBOARD="$WORK/clipboard.txt"
 export STUB_NOTIFY="$WORK/notify.log"
 
-# Jeder Fall bekommt einen frischen Zustand.
+# Every case gets a fresh state.
 fresh() {
   export SHOTLINE_STATE_DIR="$WORK/state-$RANDOM$RANDOM"
   unset SHOTLINE_GEOMETRY STUB_SLURP_OUTPUT STUB_INPUT STUB_SELECT
@@ -123,57 +123,58 @@ fresh() {
 run() { "$CLI" "$@" 2>&1; }
 
 echo
-echo "shotline -- End-to-End"
+echo "shotline -- end-to-end"
 echo
 
-# ------------------------------------------------------------------- faelle
+# ------------------------------------------------------------------- cases
 
-echo "Zustand"
+echo "State"
 fresh
 out=$(run status --json)
-check "status ohne Session meldet inaktiv" '[[ $(jq -r .active <<<"$out") == false ]]'
-check "status ohne Session zaehlt null" '[[ $(jq -r .count <<<"$out") == 0 ]]'
+check "status without a session reports inactive" '[[ $(jq -r .active <<<"$out") == false ]]'
+check "status without a session counts zero" '[[ $(jq -r .count <<<"$out") == 0 ]]'
 out=$(run status)
-contains "status im Klartext" "$out" "Keine laufende Session"
+contains "status in plain words" "$out" "No session running"
 
 fresh
 run start "Login-Flow" >/dev/null
 out=$(run status --json)
-check "start legt Session an" '[[ $(jq -r .active <<<"$out") == true ]]'
-check "start uebernimmt den Titel" '[[ $(jq -r .title <<<"$out") == "Login-Flow" ]]'
+check "start creates a session" '[[ $(jq -r .active <<<"$out") == true ]]'
+check "start takes the title" '[[ $(jq -r .title <<<"$out") == "Login-Flow" ]]'
 out=$(run start "Zweite")
-contains "zweiter start wird abgelehnt" "$out" "bereits eine Session"
+contains "a second start is refused" "$out" "already running"
 
 echo
-echo "Aufnahme"
+echo "Capture"
 fresh
 export SHOTLINE_GEOMETRY="100,200 812x460"
 out=$(run shot --comment "Die Login-Maske")
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "shot startet implizit eine Session" '[[ -n $dir ]]'
-check "shot legt ein PNG an" '[[ -f "$dir/01-die-login-maske.png" ]]'
-check "Dateiname folgt dem Kommentar" '[[ $(basename "$out") == "01-die-login-maske.png" ]]'
-check "Breite steht im JSON" '[[ $(jq -r ".shots[0].width" "$dir/session.json") == 812 ]]'
-check "Hoehe steht im JSON" '[[ $(jq -r ".shots[0].height" "$dir/session.json") == 460 ]]'
-check "Kommentar steht im JSON" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Die Login-Maske" ]]'
-check "Fensterklasse wird erkannt" '[[ $(jq -r ".shots[0].app" "$dir/session.json") == "firefox" ]]'
-check "Fenstertitel wird erkannt" '[[ $(jq -r ".shots[0].window" "$dir/session.json") == "Testfenster" ]]'
-# Ein kleineres Fenster auf einem anderen Workspace darf die Erkennung nicht kapern.
-check "Fenster von anderen Workspaces zaehlen nicht" '[[ $(jq -r ".shots[0].app" "$dir/session.json") != "chrome" ]]'
-check "PNG ist fuer andere lesbar" '[[ $(stat -c %a "$dir/01-die-login-maske.png") == 644 ]]'
-check "fehlender PNG-Header ergibt Pixelgroesse 0" '[[ $(jq -r ".shots[0].pixelWidth" "$dir/session.json") == 0 ]]'
+check "shot starts a session implicitly" '[[ -n $dir ]]'
+check "shot writes a PNG" '[[ -f "$dir/01-die-login-maske.png" ]]'
+check "the file name follows the comment" '[[ $(basename "$out") == "01-die-login-maske.png" ]]'
+check "width lands in the JSON" '[[ $(jq -r ".shots[0].width" "$dir/session.json") == 812 ]]'
+check "height lands in the JSON" '[[ $(jq -r ".shots[0].height" "$dir/session.json") == 460 ]]'
+check "the comment lands in the JSON" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Die Login-Maske" ]]'
+check "the window class is detected" '[[ $(jq -r ".shots[0].app" "$dir/session.json") == "firefox" ]]'
+check "the window title is detected" '[[ $(jq -r ".shots[0].window" "$dir/session.json") == "Testfenster" ]]'
+# A smaller window on another workspace must not hijack the detection.
+check "windows on other workspaces do not count" '[[ $(jq -r ".shots[0].app" "$dir/session.json") != "chrome" ]]'
+check "the PNG is readable by others" '[[ $(stat -c %a "$dir/01-die-login-maske.png") == 644 ]]'
+check "a missing PNG header yields pixel size 0" '[[ $(jq -r ".shots[0].pixelWidth" "$dir/session.json") == 0 ]]'
 
 run shot --comment "Fehler nach dem Absenden" >/dev/null
-check "zweiter Shot zaehlt hoch" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
-check "zweiter Shot bekommt Nummer 02" '[[ -f "$dir/02-fehler-nach-dem-absenden.png" ]]'
+check "the second shot counts up" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
+check "the second shot gets number 02" '[[ -f "$dir/02-fehler-nach-dem-absenden.png" ]]'
 
+# Deliberately German: comments with umlauts have to survive the file name.
 run shot --comment "Größe der Prüfung" >/dev/null
-check "Umlaute im Dateinamen werden ersetzt" '[[ -f "$dir/03-groesse-der-pruefung.png" ]]'
+check "umlauts in the file name are spelled out" '[[ -f "$dir/03-groesse-der-pruefung.png" ]]'
 
 run shot --comment "" >/dev/null
-check "leerer Kommentar ergibt Standardnamen" '[[ -f "$dir/04-schritt.png" ]]'
+check "an empty comment yields a default name" '[[ -f "$dir/04-step.png" ]]'
 
-# Ein echtes PNG (1x1, per Python erzeugt) muss mit seiner Pixelgroesse ankommen.
+# A real PNG (built with Python) has to arrive with its pixel size.
 fresh
 export SHOTLINE_GEOMETRY="0,0 50x50"
 real_png="$WORK/real.png"
@@ -195,13 +196,13 @@ STUB
 chmod +x "$STUBS/grim"
 run shot --comment "Echtes Bild" >/dev/null
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "Pixelbreite kommt aus dem PNG-Header" '[[ $(jq -r ".shots[0].pixelWidth" "$dir/session.json") == 120 ]]'
-check "Pixelhoehe kommt aus dem PNG-Header" '[[ $(jq -r ".shots[0].pixelHeight" "$dir/session.json") == 80 ]]'
-check "logische Auswahl bleibt daneben stehen" '[[ $(jq -r ".shots[0].width" "$dir/session.json") == 50 ]]'
+check "pixel width comes from the PNG header" '[[ $(jq -r ".shots[0].pixelWidth" "$dir/session.json") == 120 ]]'
+check "pixel height comes from the PNG header" '[[ $(jq -r ".shots[0].pixelHeight" "$dir/session.json") == 80 ]]'
+check "the logical selection stays alongside" '[[ $(jq -r ".shots[0].width" "$dir/session.json") == 50 ]]'
 run finish --target "$WORK/hidpi" --title "HiDPI" >/dev/null
-contains "Markdown nennt beide Groessen" "$(cat "$WORK/hidpi/shotline-$(date +%Y-%m-%d)-hidpi/session.md")" "50x50 px (Bild: 120x80 px)"
+contains "the markdown names both sizes" "$(cat "$WORK/hidpi/shotline-$(date +%Y-%m-%d)-hidpi/session.md")" "50x50 px (image: 120x80 px)"
 
-# Ab hier wieder der einfache grim-Stub.
+# Back to the simple grim stub from here on.
 cat >"$STUBS/grim" <<'STUB'
 #!/bin/bash
 target="${!#}"
@@ -211,39 +212,39 @@ chmod +x "$STUBS/grim"
 
 
 echo
-echo "Kommentar-Dialog"
+echo "Comment dialog"
 fresh
 export SHOTLINE_GEOMETRY="0,0 640x480"
 export STUB_INPUT="Aus dem Dialog"
 run shot >/dev/null
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "Dialog liefert den Kommentar" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Aus dem Dialog" ]]'
+check "the dialog delivers the comment" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Aus dem Dialog" ]]'
 unset STUB_INPUT
 run shot >/dev/null
-check "abgebrochener Dialog behaelt den Shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
-check "abgebrochener Dialog laesst den Kommentar leer" '[[ $(jq -r ".shots[1].comment" "$dir/session.json") == "" ]]'
+check "a cancelled dialog keeps the shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
+check "a cancelled dialog leaves the comment empty" '[[ $(jq -r ".shots[1].comment" "$dir/session.json") == "" ]]'
 
 echo
-echo "Auswahl abgebrochen"
+echo "Selection cancelled"
 fresh
 unset SHOTLINE_GEOMETRY
 export STUB_SLURP_OUTPUT=""
 out=$(run shot); rc=$?
-check "Abbruch der Auswahl endet mit Fehlercode" '[[ $rc -ne 0 ]]'
-contains "Abbruch wird gemeldet" "$out" "abgebrochen"
+check "a cancelled selection exits non-zero" '[[ $rc -ne 0 ]]'
+contains "the cancellation is reported" "$out" "cancelled"
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "Abbruch legt keinen Shot an" '[[ $(jq -r ".shots | length" "$dir/session.json") == 0 ]]'
+check "a cancellation creates no shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 0 ]]'
 
 echo
-echo "Tastenbefehle waehrend der Auswahl"
-# Return und Ctrl+Return beenden slurp und hinterlassen nur eine Markerdatei.
+echo "Keys during the selection"
+# Return and Ctrl+Return end slurp and leave nothing but a marker file.
 marker_dir="${XDG_RUNTIME_DIR:-/tmp}"
 fresh
 unset SHOTLINE_GEOMETRY
 export STUB_SLURP_OUTPUT=""
 cat >"$STUBS/slurp" <<'STUB'
 #!/bin/bash
-# Bildet den Tastenbefehl nach: kein Ergebnis, dafuer eine Markerdatei.
+# Mimics the key binding: no result, but a marker file.
 [[ -n ${STUB_MARKER:-} ]] && touch "${XDG_RUNTIME_DIR:-/tmp}/omarchy-capture-region-$STUB_MARKER"
 [[ -n ${STUB_SLURP_OUTPUT:-} ]] || exit 1
 echo "$STUB_SLURP_OUTPUT"
@@ -252,29 +253,29 @@ chmod +x "$STUBS/slurp"
 
 export STUB_MARKER="window"
 export STUB_CURSOR="900, 400"
-run shot --comment "Fenster per Return" >/dev/null
+run shot --comment "Window via Return" >/dev/null
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "Return nimmt das Fenster unter dem Zeiger" '[[ $(jq -r ".shots[0].geometry" "$dir/session.json") == "0,0 1200x900" ]]'
-check "Marker wird danach aufgeraeumt" '[[ ! -e "$marker_dir/omarchy-capture-region-window" ]]'
+check "Return takes the window under the pointer" '[[ $(jq -r ".shots[0].geometry" "$dir/session.json") == "0,0 1200x900" ]]'
+check "the marker is cleaned up afterwards" '[[ ! -e "$marker_dir/omarchy-capture-region-window" ]]'
 
 export STUB_MARKER="fullscreen"
 run shot --comment "Ganzer Bildschirm" >/dev/null
-check "Ctrl+Return nimmt den ganzen Bildschirm" '[[ $(jq -r ".shots[1].geometry" "$dir/session.json") == "0,0 1920x1080" ]]'
-check "Fullscreen-Marker wird aufgeraeumt" '[[ ! -e "$marker_dir/omarchy-capture-region-fullscreen" ]]'
+check "Ctrl+Return takes the whole screen" '[[ $(jq -r ".shots[1].geometry" "$dir/session.json") == "0,0 1920x1080" ]]'
+check "the fullscreen marker is cleaned up" '[[ ! -e "$marker_dir/omarchy-capture-region-fullscreen" ]]'
 
-# Ein Marker aus einem frueheren Lauf darf die naechste Auswahl nicht kapern.
+# A marker from an earlier run must not hijack the next selection.
 unset STUB_MARKER
 touch "$marker_dir/omarchy-capture-region-window"
 out=$(run shot --comment "Darf nicht durchgehen"); rc=$?
-check "alter Marker wird vor der Auswahl geloescht" '[[ $rc -ne 0 ]]'
-check "alter Marker fuehrt zu keinem Shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
+check "a stale marker is cleared before the selection" '[[ $rc -ne 0 ]]'
+check "a stale marker leads to no shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
 rm -f "$marker_dir/omarchy-capture-region-window"
 
-# Zeiger ausserhalb jedes Fensters trifft den Monitor.
+# A pointer outside every window hits the monitor.
 export STUB_MARKER="window"
 export STUB_CURSOR="5000, 5000"
 run shot --comment "Zeiger im Nichts" >/dev/null
-check "Zeiger ausserhalb faellt auf den Monitor zurueck" '[[ $(jq -r ".shots[2].geometry" "$dir/session.json") == "0,0 1920x1080" ]]'
+check "a pointer outside falls back to the monitor" '[[ $(jq -r ".shots[2].geometry" "$dir/session.json") == "0,0 1920x1080" ]]'
 unset STUB_MARKER STUB_CURSOR
 
 cat >"$STUBS/slurp" <<'STUB'
@@ -285,36 +286,36 @@ STUB
 chmod +x "$STUBS/slurp"
 
 echo
-echo "Auswahl per slurp"
+echo "Selection via slurp"
 fresh
 unset SHOTLINE_GEOMETRY
 export STUB_SLURP_OUTPUT="10,20 300x150"
 run shot --comment "Aus slurp" >/dev/null
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "slurp-Geometrie landet im JSON" '[[ $(jq -r ".shots[0].geometry" "$dir/session.json") == "10,20 300x150" ]]'
-check "slurp-Breite wird uebernommen" '[[ $(jq -r ".shots[0].width" "$dir/session.json") == 300 ]]'
+check "slurp geometry lands in the JSON" '[[ $(jq -r ".shots[0].geometry" "$dir/session.json") == "10,20 300x150" ]]'
+check "slurp width is taken over" '[[ $(jq -r ".shots[0].width" "$dir/session.json") == 300 ]]'
 unset STUB_SLURP_OUTPUT
 
 echo
-echo "Rueckgaengig und Liste"
+echo "Undo and list"
 fresh
 export SHOTLINE_GEOMETRY="0,0 100x100"
 run shot --comment "Eins" >/dev/null
 run shot --comment "Zwei" >/dev/null
 dir=$(jq -r .dir <<<"$(run status --json)")
 run undo >/dev/null
-check "undo entfernt den Eintrag" '[[ $(jq -r ".shots | length" "$dir/session.json") == 1 ]]'
-check "undo loescht die Bilddatei" '[[ ! -f "$dir/02-zwei.png" ]]'
-check "undo laesst den ersten Shot stehen" '[[ -f "$dir/01-eins.png" ]]'
+check "undo removes the entry" '[[ $(jq -r ".shots | length" "$dir/session.json") == 1 ]]'
+check "undo deletes the image file" '[[ ! -f "$dir/02-zwei.png" ]]'
+check "undo leaves the first shot alone" '[[ -f "$dir/01-eins.png" ]]'
 out=$(run list)
-contains "list zeigt den Kommentar" "$out" "Eins"
-contains "list zeigt die Groesse" "$out" "100x100"
+contains "list shows the comment" "$out" "Eins"
+contains "list shows the size" "$out" "100x100"
 run undo >/dev/null
 out=$(run undo)
-contains "undo ohne Shots meldet das" "$out" "keine Shots"
+contains "undo without shots says so" "$out" "no shots"
 
 echo
-echo "Abschluss"
+echo "Finishing"
 fresh
 export SHOTLINE_GEOMETRY="0,0 800x600"
 run shot --comment "Startbildschirm" >/dev/null
@@ -322,41 +323,41 @@ run shot --comment "Fehlermeldung" >/dev/null
 target="$WORK/agent"
 out=$(run finish --target "$target" --title "Login Flow")
 result="$target/shotline-$(date +%Y-%m-%d)-login-flow"
-check "Zielordner traegt Datum und Titel" '[[ -d "$result" ]]'
-check "session.html liegt im Ziel" '[[ -f "$result/session.html" ]]'
-check "session.md liegt im Ziel" '[[ -f "$result/session.md" ]]'
-check "Bilder liegen im Ziel" '[[ -f "$result/01-startbildschirm.png" ]]'
-check "session.json bleibt draussen" '[[ ! -f "$result/session.json" ]]'
-check "Arbeitsverzeichnis ist geraeumt" '[[ $(jq -r .active <<<"$(run status --json)") == false ]]'
-contains "Ausgabe nennt den Zielpfad" "$out" "$result"
-contains "Ausgabe enthaelt den Agenten-Prompt" "$out" "session.md"
-contains "Prompt nennt die Anzahl" "$out" "2 Screenshots"
-check "Prompt liegt in der Zwischenablage" '[[ -s "$STUB_CLIPBOARD" ]]'
-contains "Zwischenablage nennt den Pfad" "$(cat "$STUB_CLIPBOARD")" "$result/session.md"
+check "the target folder carries date and title" '[[ -d "$result" ]]'
+check "session.html is in the target" '[[ -f "$result/session.html" ]]'
+check "session.md is in the target" '[[ -f "$result/session.md" ]]'
+check "the images are in the target" '[[ -f "$result/01-startbildschirm.png" ]]'
+check "session.json stays out" '[[ ! -f "$result/session.json" ]]'
+check "the working directory is cleared" '[[ $(jq -r .active <<<"$(run status --json)") == false ]]'
+contains "the output names the target path" "$out" "$result"
+contains "the output contains the agent prompt" "$out" "session.md"
+contains "the prompt names the count" "$out" "2 screenshots"
+check "the prompt is in the clipboard" '[[ -s "$STUB_CLIPBOARD" ]]'
+contains "the clipboard names the path" "$(cat "$STUB_CLIPBOARD")" "$result/session.md"
 md=$(cat "$result/session.md")
-contains "Markdown nennt den Titel" "$md" "Login Flow"
-contains "Markdown verlinkt relativ" "$md" "](01-startbildschirm.png)"
+contains "the markdown names the title" "$md" "Login Flow"
+contains "the markdown links relatively" "$md" "](01-startbildschirm.png)"
 htmlfile=$(cat "$result/session.html")
-contains "HTML nennt den Titel" "$htmlfile" "Login Flow"
-contains "HTML hat den Theme-Umschalter" "$htmlfile" "toggleTheme"
+contains "the HTML names the title" "$htmlfile" "Login Flow"
+contains "the HTML has the theme toggle" "$htmlfile" "toggleTheme"
 
 out=$(run prompt)
-contains "prompt wiederholt den Pfad" "$out" "$result"
+contains "prompt repeats the path" "$out" "$result"
 
 echo
-echo "Zielordner-Merkliste"
+echo "Target shortlist"
 recent="$SHOTLINE_STATE_DIR/recent-targets"
-check "Zielordner wird gemerkt" '[[ $(head -1 "$recent") == "$target" ]]'
+check "the target folder is remembered" '[[ $(head -1 "$recent") == "$target" ]]'
 run shot --comment "Noch einer" >/dev/null
 export STUB_SELECT="$target"
 export STUB_INPUT="Zweiter Lauf"
 run finish >/dev/null
-check "Auswahl aus der Merkliste funktioniert" '[[ -d "$target/shotline-$(date +%Y-%m-%d)-zweiter-lauf" ]]'
-check "Merkliste bleibt ohne Duplikate" '[[ $(grep -cxF "$target" "$recent") == 1 ]]'
+check "picking from the shortlist works" '[[ -d "$target/shotline-$(date +%Y-%m-%d)-zweiter-lauf" ]]'
+check "the shortlist stays free of duplicates" '[[ $(grep -cxF "$target" "$recent") == 1 ]]'
 unset STUB_SELECT STUB_INPUT
 
 echo
-echo "Namenskollision"
+echo "Name collision"
 fresh
 export SHOTLINE_GEOMETRY="0,0 100x100"
 target="$WORK/kollision"
@@ -365,57 +366,57 @@ run finish --target "$target" --title "Gleich" >/dev/null
 run shot --comment "B" >/dev/null
 run finish --target "$target" --title "Gleich" >/dev/null
 base="shotline-$(date +%Y-%m-%d)-gleich"
-check "erster Ordner bleibt bestehen" '[[ -f "$target/$base/01-a.png" ]]'
-check "zweiter Ordner bekommt ein Suffix" '[[ -f "$target/$base-2/01-b.png" ]]'
+check "the first folder survives" '[[ -f "$target/$base/01-a.png" ]]'
+check "the second folder gets a suffix" '[[ -f "$target/$base-2/01-b.png" ]]'
 
 echo
-echo "Abbruch der Session"
+echo "Cancelling the session"
 fresh
 export SHOTLINE_GEOMETRY="0,0 100x100"
 run shot --comment "Weg damit" >/dev/null
 dir=$(jq -r .dir <<<"$(run status --json)")
 run cancel >/dev/null
-check "cancel loescht das Arbeitsverzeichnis" '[[ ! -d "$dir" ]]'
-check "cancel beendet die Session" '[[ $(jq -r .active <<<"$(run status --json)") == false ]]'
+check "cancel deletes the working directory" '[[ ! -d "$dir" ]]'
+check "cancel ends the session" '[[ $(jq -r .active <<<"$(run status --json)") == false ]]'
 out=$(run cancel)
-contains "cancel ohne Session meldet das" "$out" "keine laufende Session"
+contains "cancel without a session says so" "$out" "no session running"
 
 echo
-echo "Abschluss ohne Shots"
+echo "Finishing without shots"
 fresh
 run start "Leer" >/dev/null
 out=$(run finish --target "$WORK/leer")
-contains "finish ohne Shots wird abgelehnt" "$out" "keine Shots"
-check "finish ohne Shots legt nichts an" '[[ ! -d "$WORK/leer" ]]'
+contains "finish without shots is refused" "$out" "no shots"
+check "finish without shots creates nothing" '[[ ! -d "$WORK/leer" ]]'
 
 echo
-echo "Schlafender Bildschirm"
+echo "Sleeping screen"
 fresh
 export SHOTLINE_GEOMETRY="0,0 100x100"
 export STUB_DPMS=false
 export STUB_HYPRCTL_LOG="$WORK/hyprctl.log"
 : >"$STUB_HYPRCTL_LOG"
 run shot --comment "Nach dem Aufwecken" >/dev/null
-contains "schlafender Bildschirm wird geweckt" "$(cat "$STUB_HYPRCTL_LOG")" 'hl.dsp.dpms("on")'
+contains "a sleeping screen is woken" "$(cat "$STUB_HYPRCTL_LOG")" 'hl.dsp.dpms("on")'
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "Shot gelingt nach dem Wecken" '[[ $(jq -r ".shots | length" "$dir/session.json") == 1 ]]'
-# Aeltere Hyprland-Versionen kennen die Lua-Form nicht: dann greift die Kurzform.
+check "the shot succeeds after waking" '[[ $(jq -r ".shots | length" "$dir/session.json") == 1 ]]'
+# Older Hyprland versions do not know the Lua form: then the short form applies.
 : >"$STUB_HYPRCTL_LOG"
 export STUB_EVAL_FAILS=1
 run shot --comment "Alter Hyprland-Weg" >/dev/null
-contains "Rueckfall auf die alte dpms-Kurzform" "$(cat "$STUB_HYPRCTL_LOG")" "dispatch dpms on"
+contains "falls back to the old dpms short form" "$(cat "$STUB_HYPRCTL_LOG")" "dispatch dpms on"
 unset STUB_EVAL_FAILS
 
 unset STUB_DPMS
 : >"$STUB_HYPRCTL_LOG"
 run shot --comment "Wacher Bildschirm" >/dev/null
-check "wacher Bildschirm wird nicht geweckt" '[[ $(grep -c "dpms" "$STUB_HYPRCTL_LOG") == 0 ]]'
-check "Hardware-Cursor wird fuer die Aufnahme erzwungen" '[[ $(grep -c "keyword cursor:no_hardware_cursors 0$" "$STUB_HYPRCTL_LOG") == 1 ]]'
-check "Cursor-Einstellung wird danach zurueckgesetzt" '[[ $(grep -c "keyword cursor:no_hardware_cursors 2$" "$STUB_HYPRCTL_LOG") == 1 ]]'
+check "an awake screen is not woken" '[[ $(grep -c "dpms" "$STUB_HYPRCTL_LOG") == 0 ]]'
+check "hardware cursors are forced for the capture" '[[ $(grep -c "keyword cursor:no_hardware_cursors 0$" "$STUB_HYPRCTL_LOG") == 1 ]]'
+check "the cursor setting is restored afterwards" '[[ $(grep -c "keyword cursor:no_hardware_cursors 2$" "$STUB_HYPRCTL_LOG") == 1 ]]'
 unset STUB_HYPRCTL_LOG
 
 echo
-echo "Haengendes grim"
+echo "Hanging grim"
 fresh
 export SHOTLINE_GEOMETRY="0,0 100x100"
 export SHOTLINE_GRAB_TIMEOUT=1
@@ -427,11 +428,11 @@ chmod +x "$STUBS/grim"
 start=$(date +%s)
 out=$(run shot --comment "Haenger"); rc=$?
 elapsed=$(( $(date +%s) - start ))
-check "haengendes grim wird abgebrochen" '[[ $rc -ne 0 ]]'
-check "Abbruch dauert nur Sekunden" '[[ $elapsed -lt 10 ]]'
-contains "Hinweis auf den schlafenden Bildschirm" "$out" "schlaeft vermutlich"
+check "a hanging grim is aborted" '[[ $rc -ne 0 ]]'
+check "the abort takes only seconds" '[[ $elapsed -lt 10 ]]'
+contains "hint about the sleeping screen" "$out" "probably asleep"
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "haengendes grim legt keinen Shot an" '[[ $(jq -r ".shots | length" "$dir/session.json") == 0 ]]'
+check "a hanging grim creates no shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 0 ]]'
 unset SHOTLINE_GRAB_TIMEOUT
 cat >"$STUBS/grim" <<'STUB'
 #!/bin/bash
@@ -442,44 +443,44 @@ STUB
 chmod +x "$STUBS/grim"
 
 echo
-echo "Stiller Modus"
+echo "Quiet mode"
 fresh
 export SHOTLINE_GEOMETRY="0,0 100x100"
 : >"$STUB_NOTIFY"
 run shot --comment "Mit Meldung" >/dev/null
-check "normal meldet sich das Werkzeug" '[[ -s "$STUB_NOTIFY" ]]'
+check "normally the tool announces itself" '[[ -s "$STUB_NOTIFY" ]]'
 : >"$STUB_NOTIFY"
 SHOTLINE_QUIET=1 "$CLI" shot --comment "Ohne Meldung" >/dev/null 2>&1
-check "SHOTLINE_QUIET unterdrueckt Meldungen" '[[ ! -s "$STUB_NOTIFY" ]]'
+check "SHOTLINE_QUIET mutes messages" '[[ ! -s "$STUB_NOTIFY" ]]'
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "stiller Modus nimmt trotzdem auf" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
+check "quiet mode still captures" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
 
 export STUB_SHELL_LOG="$WORK/shell.log"
 : >"$STUB_SHELL_LOG"
 run shot --comment "Widget stupsen" >/dev/null
-contains "das Bar-Widget wird angestupst" "$(cat "$STUB_SHELL_LOG")" "olivgrau.shotline refresh"
+contains "the bar widget gets nudged" "$(cat "$STUB_SHELL_LOG")" "olivgrau.shotline refresh"
 unset STUB_SHELL_LOG
 
 echo
-echo "Namen und Pfade"
+echo "Names and paths"
 fresh
 export SHOTLINE_GEOMETRY="0,0 100x100"
-run shot --comment "Ein sehr langer Kommentar der auf jeden Fall abgeschnitten werden muss" >/dev/null
+run shot --comment "A very long comment that definitely has to be cut off somewhere" >/dev/null
 dir=$(jq -r .dir <<<"$(run status --json)")
 name=$(jq -r ".shots[0].file" "$dir/session.json")
-check "langer Name wird gekuerzt" '[[ ${#name} -le 48 ]]'
-check "gekuerzter Name endet nicht auf einem Bindestrich" '[[ $name != *-.png ]]'
+check "a long name gets shortened" '[[ ${#name} -le 48 ]]'
+check "a shortened name does not end in a hyphen" '[[ $name != *-.png ]]'
 
-# Ein relativer Zielpfad muss absolut im Ergebnis und im Prompt landen.
+# A relative target path has to land absolute in the result and in the prompt.
 mkdir -p "$WORK/relativ"
 out=$(cd "$WORK" && SHOTLINE_STATE_DIR="$SHOTLINE_STATE_DIR" "$CLI" finish --target "./relativ" --title "Relativ" 2>&1)
-check "relatives Ziel wird absolut aufgeloest" '[[ -d "$WORK/relativ/shotline-$(date +%Y-%m-%d)-relativ" ]]'
-check "Prompt enthaelt keinen relativen Pfad" '[[ $out != *"./relativ/shotline"* ]]'
-contains "Prompt nennt den absoluten Pfad" "$out" "$WORK/relativ/shotline"
-contains "ein einzelner Shot steht im Singular" "$out" "liegt 1 Screenshot "
+check "a relative target is resolved to an absolute path" '[[ -d "$WORK/relativ/shotline-$(date +%Y-%m-%d)-relativ" ]]'
+check "the prompt holds no relative path" '[[ $out != *"./relativ/shotline"* ]]'
+contains "the prompt names the absolute path" "$out" "$WORK/relativ/shotline"
+contains "a single shot reads as singular" "$out" "There is 1 screenshot "
 
 echo
-echo "Markieren im Editor"
+echo "Annotating in the editor"
 fresh
 export SHOTLINE_GEOMETRY="0,0 400x300"
 export STUB_EDITOR_LOG="$WORK/editor.log"
@@ -487,7 +488,7 @@ cat >"$WORK/editor-stub" <<'STUB'
 #!/bin/bash
 echo "$1|$2" >>"${STUB_EDITOR_LOG:-/dev/null}"
 [[ ${STUB_EDITOR_FAILS:-} == 1 ]] && exit 1
-# Der Editor darf das Bild ersetzen: hier durch eines mit anderer Groesse.
+# The editor may replace the image: here with one of a different size.
 [[ -n ${STUB_EDITOR_REPLACEMENT:-} ]] && cp "$STUB_EDITOR_REPLACEMENT" "$1"
 exit 0
 STUB
@@ -496,26 +497,26 @@ export SHOTLINE_EDITOR_STUB="$WORK/editor-stub"
 
 run shot --comment "Vor der Markierung" >/dev/null
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "status meldet Markieren moeglich" '[[ $(jq -r .canAnnotate <<<"$(run status --json)") == true ]]'
+check "status reports annotation as possible" '[[ $(jq -r .canAnnotate <<<"$(run status --json)") == true ]]'
 
 : >"$STUB_EDITOR_LOG"
 export STUB_INPUT="Nach der Markierung"
 run annotate >/dev/null
-contains "Editor bekommt die Bilddatei" "$(cat "$STUB_EDITOR_LOG")" "01-vor-der-markierung.png"
-contains "Editor startet mit dem Stift" "$(cat "$STUB_EDITOR_LOG")" "|brush"
-check "Kommentar wird nachgezogen" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Nach der Markierung" ]]'
-check "Shot ist als markiert vermerkt" '[[ $(jq -r ".shots[0].annotated" "$dir/session.json") == true ]]'
+contains "the editor receives the image file" "$(cat "$STUB_EDITOR_LOG")" "01-vor-der-markierung.png"
+contains "the editor starts with the pen" "$(cat "$STUB_EDITOR_LOG")" "|brush"
+check "the comment is updated" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Nach der Markierung" ]]'
+check "the shot is flagged as annotated" '[[ $(jq -r ".shots[0].annotated" "$dir/session.json") == true ]]'
 
 : >"$STUB_EDITOR_LOG"
 unset STUB_INPUT
 run annotate >/dev/null
-check "leere Eingabe behaelt den Kommentar" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Nach der Markierung" ]]'
+check "an empty entry keeps the comment" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Nach der Markierung" ]]'
 
 : >"$STUB_EDITOR_LOG"
 run annotate --blur >/dev/null
-contains "Blur startet mit dem passenden Werkzeug" "$(cat "$STUB_EDITOR_LOG")" "|blur"
+contains "blur starts with the matching tool" "$(cat "$STUB_EDITOR_LOG")" "|blur"
 
-# Ein Editor, der zuschneidet, aendert die Bildgroesse: sie wird neu gemessen.
+# An editor that crops changes the image size: it gets measured again.
 big_png="$WORK/big.png"
 python - "$big_png" <<'PYPNG'
 import binascii, struct, sys
@@ -530,82 +531,82 @@ open(sys.argv[1], "wb").write(png)
 PYPNG
 export STUB_EDITOR_REPLACEMENT="$big_png"
 run annotate >/dev/null
-check "Bildgroesse wird nach dem Editor neu gemessen" '[[ $(jq -r ".shots[0].pixelWidth" "$dir/session.json") == 640 ]]'
+check "the image size is measured again after the editor" '[[ $(jq -r ".shots[0].pixelWidth" "$dir/session.json") == 640 ]]'
 unset STUB_EDITOR_REPLACEMENT
 
-# Abbruch im Editor darf nichts veraendern.
+# Aborting in the editor must change nothing.
 run shot --comment "Bleibt so" >/dev/null
 export STUB_EDITOR_FAILS=1
 export STUB_INPUT="Darf nicht ankommen"
 out=$(run annotate); rc=$?
-check "abgebrochener Editor endet mit Fehlercode" '[[ $rc -ne 0 ]]'
-check "abgebrochener Editor laesst den Kommentar stehen" '[[ $(jq -r ".shots[1].comment" "$dir/session.json") == "Bleibt so" ]]'
-check "abgebrochener Editor setzt kein Markiert-Kennzeichen" '[[ $(jq -r ".shots[1].annotated" "$dir/session.json") == null ]]'
+check "an aborted editor exits non-zero" '[[ $rc -ne 0 ]]'
+check "an aborted editor leaves the comment alone" '[[ $(jq -r ".shots[1].comment" "$dir/session.json") == "Bleibt so" ]]'
+check "an aborted editor sets no annotated flag" '[[ $(jq -r ".shots[1].annotated" "$dir/session.json") == null ]]'
 unset STUB_EDITOR_FAILS STUB_INPUT
 
-# Ein bestimmter Shot laesst sich gezielt waehlen.
+# A specific shot can be picked on purpose.
 : >"$STUB_EDITOR_LOG"
 run annotate --index 1 >/dev/null
-contains "Index waehlt den ersten Shot" "$(cat "$STUB_EDITOR_LOG")" "01-vor-der-markierung.png"
+contains "the index picks the first shot" "$(cat "$STUB_EDITOR_LOG")" "01-vor-der-markierung.png"
 out=$(run annotate --index 9)
-contains "unbekannter Index wird abgelehnt" "$out" "keinen Shot Nummer 9"
+contains "an unknown index is refused" "$out" "no shot number 9"
 
 fresh
 out=$(run annotate)
-contains "annotate ohne Session meldet das" "$out" "keine laufende Session"
+contains "annotate without a session says so" "$out" "no session running"
 
 echo
-echo "Menue"
+echo "Menu"
 fresh
 export SHOTLINE_GEOMETRY="0,0 100x100"
 export STUB_SELECT_LOG="$WORK/menu.log"
 : >"$STUB_SELECT_LOG"
-export STUB_SELECT="Naechster Shot"
+export STUB_SELECT="Next shot"
 run menu >/dev/null
 menu_leer=$(cat "$STUB_SELECT_LOG")
-check "Menue ohne Shots bietet nur die Aufnahme" '[[ $(grep -c "markieren" <<<"$menu_leer") == 0 ]]'
-contains "Menue bietet den naechsten Shot" "$menu_leer" "Naechster Shot"
+check "the menu without shots offers only capture" '[[ $(grep -c "Annotate" <<<"$menu_leer") == 0 ]]'
+contains "the menu offers the next shot" "$menu_leer" "Next shot"
 dir=$(jq -r .dir <<<"$(run status --json)")
-check "Menue-Auswahl nimmt einen Shot auf" '[[ $(jq -r ".shots | length" "$dir/session.json") == 1 ]]'
+check "a menu choice captures a shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 1 ]]'
 
 : >"$STUB_SELECT_LOG"
-export STUB_SELECT="Letzten markieren"
-export STUB_INPUT="Aus dem Menue markiert"
+export STUB_SELECT="Annotate last shot"
+export STUB_INPUT="Annotated from the menu"
 : >"$STUB_EDITOR_LOG"
 run menu >/dev/null
 menu_voll=$(cat "$STUB_SELECT_LOG")
-contains "Menue bietet Markieren" "$menu_voll" "Letzten markieren"
-contains "Menue bietet Unkenntlichmachen" "$menu_voll" "Letzten unkenntlich machen"
-contains "Menue bietet den Abschluss" "$menu_voll" "Serie abschliessen"
-contains "Menue bietet das Verwerfen" "$menu_voll" "Serie verwerfen"
-check "Menue-Eintraege tragen ein Symbol vor dem Label" '[[ $(grep -cP "^\\S+\\tLetzten markieren$" <<<"$menu_voll") == 1 ]]'
-check "Menue startet den Editor" '[[ -s "$STUB_EDITOR_LOG" ]]'
-check "Menue zieht den Kommentar nach" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Aus dem Menue markiert" ]]'
+contains "the menu offers annotating" "$menu_voll" "Annotate last shot"
+contains "the menu offers blurring" "$menu_voll" "Blur out last shot"
+contains "the menu offers finishing" "$menu_voll" "Finish series"
+contains "the menu offers discarding" "$menu_voll" "Discard series"
+check "menu entries carry an icon before the label" '[[ $(grep -cP "^\\S+\\tAnnotate last shot$" <<<"$menu_voll") == 1 ]]'
+check "the menu starts the editor" '[[ -s "$STUB_EDITOR_LOG" ]]'
+check "the menu updates the comment" '[[ $(jq -r ".shots[0].comment" "$dir/session.json") == "Annotated from the menu" ]]'
 
-export STUB_SELECT="Letzten verwerfen"
+export STUB_SELECT="Discard last shot"
 run menu >/dev/null
-check "Menue verwirft den letzten Shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 0 ]]'
+check "the menu discards the last shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 0 ]]'
 
 export STUB_SELECT=""
 out=$(run menu); rc=$?
-check "abgebrochenes Menue endet ohne Fehler" '[[ $rc -eq 0 ]]'
+check "a cancelled menu exits cleanly" '[[ $rc -eq 0 ]]'
 unset STUB_SELECT STUB_INPUT STUB_SELECT_LOG
 
 echo
-echo "Bedienhilfen"
+echo "Usage help"
 fresh
 out=$(run --help)
-contains "Hilfe nennt shot" "$out" "shot"
-contains "Hilfe nennt finish" "$out" "finish"
-contains "Hilfe nennt annotate" "$out" "annotate"
-contains "Hilfe nennt menu" "$out" "menu"
+contains "the help names shot" "$out" "shot"
+contains "the help names finish" "$out" "finish"
+contains "the help names annotate" "$out" "annotate"
+contains "the help names menu" "$out" "menu"
 out=$(run quatsch 2>&1); rc=$?
-check "unbekannter Befehl endet mit Code 2" '[[ $rc -eq 2 ]]'
+check "an unknown command exits with code 2" '[[ $rc -eq 2 ]]'
 
 echo
-printf 'Ergebnis: \033[32m%d bestanden\033[0m, ' "$PASSED"
+printf 'Result: \033[32m%d passed\033[0m, ' "$PASSED"
 if ((FAILED > 0)); then
-  printf '\033[31m%d gescheitert\033[0m\n\n' "$FAILED"
+  printf '\033[31m%d failed\033[0m\n\n' "$FAILED"
   exit 1
 fi
-printf '0 gescheitert\n\n'
+printf '0 failed\n\n'

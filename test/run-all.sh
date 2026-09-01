@@ -1,5 +1,5 @@
 #!/bin/bash
-# Faehrt alle Tests. Ohne Wayland-Sitzung nutzbar.
+# Runs every test. Works without a Wayland session.
 set -uo pipefail
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$HERE")"
@@ -9,17 +9,17 @@ echo "== Renderer (Python) =="
 "${PYTHON:-python}" "$HERE/test_render.py" 2>&1 | tail -4 || FAILED=1
 
 echo
-echo "== CLI (Bash, End-to-End) =="
+echo "== CLI (Bash, end-to-end) =="
 "$HERE/test_cli.sh" || FAILED=1
 
 echo "== Manifest =="
 if command -v omarchy-plugin-validate >/dev/null 2>&1; then
-  omarchy-plugin-validate "$ROOT" && echo "manifest.json ist gueltig" || FAILED=1
+  omarchy-plugin-validate "$ROOT" && echo "manifest.json is valid" || FAILED=1
 else
-  jq -e . "$ROOT/manifest.json" >/dev/null && echo "manifest.json ist gueltiges JSON (Validator fehlt)" || FAILED=1
+  jq -e . "$ROOT/manifest.json" >/dev/null && echo "manifest.json is valid JSON (validator missing)" || FAILED=1
 fi
 
-echo "== Shell-Syntax =="
+echo "== Shell syntax =="
 bash -n "$ROOT/bin/shotline" && bash -n "$ROOT/install.sh" && echo "bash ok" || FAILED=1
 
 exit $FAILED
