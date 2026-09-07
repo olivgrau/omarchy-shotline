@@ -2,7 +2,11 @@
 # shotline -- installer for Omarchy.
 #
 #   ./install.sh            install everything
+#   ./install.sh bindings   only the key bindings and the launcher
 #   ./install.sh uninstall  remove everything it added
+#
+# Use `bindings` after `omarchy plugin add`: the plugin folder is already in
+# place then, only the key bindings are still missing.
 #
 # The installer only touches its own files and one clearly marked block in
 # bindings.lua. An uninstall restores the previous state.
@@ -15,7 +19,19 @@ set -euo pipefail
 ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ACTION="${1:-install}"
 
-PLUGIN_ID="olivgrau.shotline"
+case "$ACTION" in
+  install | bindings | uninstall) ;;
+  -h | --help)
+    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+    exit 0
+    ;;
+  *)
+    printf 'unknown action: %s (use install, bindings or uninstall)\n' "$ACTION" >&2
+    exit 2
+    ;;
+esac
+
+PLUGIN_ID="io.github.olivgrau.shotline"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 BIN_DIR="$HOME/.local/bin"
 HYPR_BINDINGS="$HOME/.config/hypr/bindings.lua"
@@ -58,11 +74,19 @@ if [[ $ACTION == "uninstall" ]]; then
   say "removing the launcher"
   rm -f "$BIN_DIR/shotline" "$BIN_DIR/shotline-render"
 
-  if [[ -e $PLUGIN_DIR ]]; then
+  if [[ -L $PLUGIN_DIR ]]; then
+    # Our own symlink from an earlier ./install.sh. Removing the link leaves
+    # the repo it points at untouched.
     say "removing the shell plugin"
     omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
-    rm -rf "$PLUGIN_DIR"
+    rm -f "$PLUGIN_DIR"
     omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  elif [[ -d $PLUGIN_DIR ]]; then
+    # A real folder means `omarchy plugin add` cloned it. That clone is not
+    # ours to delete: it may be the very directory this script runs from.
+    say "disabling the shell plugin"
+    omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
+    warn "$PLUGIN_DIR came from 'omarchy plugin add'. Remove it with: omarchy plugin remove $PLUGIN_ID"
   fi
 
   say "reverting the key bindings"
@@ -92,21 +116,33 @@ case ":$PATH:" in
   *) warn "$BIN_DIR is not on PATH. The key bindings use the full path, so that is fine." ;;
 esac
 
-say "installing the shell plugin ($PLUGIN_ID)"
-mkdir -p "$HOME/.config/omarchy/plugins"
-rm -rf "$PLUGIN_DIR"
-# The repo root is the plugin directory: manifest.json lives here. The symlink
-# lets changes in the repo take effect in omarchy-shell right away.
-ln -sfn "$ROOT" "$PLUGIN_DIR"
+if [[ $ACTION == "install" ]]; then
+  if command -v omarchy-plugin-validate >/dev/null 2>&1; then
+    omarchy-plugin-validate "$ROOT" >/dev/null || { warn "manifest.json is invalid"; exit 1; }
+  fi
 
-if command -v omarchy-plugin-validate >/dev/null 2>&1; then
-  omarchy-plugin-validate "$ROOT" >/dev/null || { warn "manifest.json is invalid"; exit 1; }
-fi
+  mkdir -p "$HOME/.config/omarchy/plugins"
 
-if command -v omarchy-shell >/dev/null 2>&1; then
-  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || warn "could not rescan the plugins"
-  omarchy plugin enable "$PLUGIN_ID" >/dev/null 2>&1 \
-    || warn "enable it yourself: omarchy plugin enable $PLUGIN_ID"
+  if [[ -d $PLUGIN_DIR && ! -L $PLUGIN_DIR ]]; then
+    # `omarchy plugin add` already cloned the plugin here. Deleting that folder
+    # would take its .git with it and break `omarchy plugin update`. It can also
+    # be the directory this script runs from. Leave it alone.
+    say "plugin folder already in place ($PLUGIN_DIR)"
+    say "update it with: omarchy plugin update $PLUGIN_ID"
+  else
+    say "installing the shell plugin ($PLUGIN_ID)"
+    # The repo root is the plugin directory: manifest.json lives here. The
+    # symlink lets changes in the repo take effect in omarchy-shell right away.
+    # Only a symlink is ever removed, never a folder.
+    rm -f "$PLUGIN_DIR"
+    ln -sfn "$ROOT" "$PLUGIN_DIR"
+  fi
+
+  if command -v omarchy-shell >/dev/null 2>&1; then
+    omarchy-shell shell rescanPlugins >/dev/null 2>&1 || warn "could not rescan the plugins"
+    omarchy plugin enable "$PLUGIN_ID" >/dev/null 2>&1 \
+      || warn "enable it yourself: omarchy plugin enable $PLUGIN_ID"
+  fi
 fi
 
 # The installer reports taken keys instead of silently overriding them.

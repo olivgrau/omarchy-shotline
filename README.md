@@ -66,21 +66,60 @@ tells the agent to work through the comments as a task list.
 ## Installation
 
 ```bash
+omarchy plugin add https://github.com/olivgrau/omarchy-shotline.git --enable
+```
+
+That clones the plugin into `~/.config/omarchy/plugins/io.github.olivgrau.shotline`
+and puts the bar widget in the bar. Everything you can reach through the widget
+works right away.
+
+`omarchy plugin add` runs no script, so the key bindings are still missing. Add
+them from the plugin folder:
+
+```bash
+cd ~/.config/omarchy/plugins/io.github.olivgrau.shotline
+./install.sh bindings
+```
+
+This links the CLI into `~/.local/bin` and writes a marked block into
+`~/.config/hypr/bindings.lua`. It binds `SHOT_KEY`, `MARK_KEY`, `UNDO_KEY`,
+`MENU_KEY` and `FINISH_KEY`, and warns when a key is already taken in Hyprland.
+Different keys:
+
+```bash
+SHOT_KEY="SUPER + SHIFT + P" MARK_KEY="SUPER + ALT + P" ./install.sh bindings
+```
+
+### Update
+
+```bash
+omarchy plugin update io.github.olivgrau.shotline
+```
+
+### Removal
+
+```bash
+./install.sh uninstall
+omarchy plugin remove io.github.olivgrau.shotline
+```
+
+`./install.sh uninstall` takes back the key bindings and the CLI links.
+`omarchy plugin remove` deletes the plugin folder. Captured series stay in
+place; both commands leave them untouched.
+
+### From a clone
+
+For development, clone the repo anywhere and run the full installer. It
+symlinks the repo into the plugins directory, so edits take effect right away:
+
+```bash
+git clone https://github.com/olivgrau/omarchy-shotline.git
+cd omarchy-shotline
 ./install.sh
 ```
 
-The installer links the CLI into `~/.local/bin`, registers the plugin under
-`~/.config/omarchy/plugins/olivgrau.shotline` and writes a marked block into
-`~/.config/hypr/bindings.lua`. Different keys:
-
-```bash
-SHOT_KEY="SUPER + SHIFT + P" MARK_KEY="SUPER + ALT + P" ./install.sh
-```
-
-It binds `SHOT_KEY`, `MARK_KEY`, `UNDO_KEY`, `MENU_KEY` and `FINISH_KEY`, and
-warns when a key is already taken in Hyprland.
-
-`./install.sh uninstall` reverts everything it added. Captured series stay.
+The installer never deletes a plugin folder that `omarchy plugin add` created.
+Pick one of the two ways, not both.
 
 ## CLI
 
@@ -119,6 +158,9 @@ Widget settings (`omarchy bar set`): `hideWhenIdle`, `showCount`, `showPen`,
 | `bin/shotline-render` | renderer: `session.json` to HTML and Markdown |
 | `BarWidget.qml` | bar widget with counter and pen |
 | `manifest.json` | plugin manifest, schema 1 |
+| `install.sh` | key bindings, CLI links, plugin registration |
+| `preview.png` | marketplace preview image |
+| `docs/OVERVIEW.html` | one-page overview to look at |
 | `test/` | tests |
 
 The running session lives in `~/.local/state/shotline/sessions/<id>/` with

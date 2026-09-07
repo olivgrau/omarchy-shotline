@@ -16,7 +16,7 @@
 set -uo pipefail
 
 VERSION="1.0.0"
-PLUGIN_ID="olivgrau.shotline"
+PLUGIN_ID="io.github.olivgrau.shotline"
 SCHEMA=1
 
 STATE_DIR="${SHOTLINE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/shotline}"

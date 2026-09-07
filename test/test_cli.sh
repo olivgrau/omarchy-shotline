@@ -458,7 +458,7 @@ check "quiet mode still captures" '[[ $(jq -r ".shots | length" "$dir/session.js
 export STUB_SHELL_LOG="$WORK/shell.log"
 : >"$STUB_SHELL_LOG"
 run shot --comment "Widget stupsen" >/dev/null
-contains "the bar widget gets nudged" "$(cat "$STUB_SHELL_LOG")" "olivgrau.shotline refresh"
+contains "the bar widget gets nudged" "$(cat "$STUB_SHELL_LOG")" "io.github.olivgrau.shotline refresh"
 unset STUB_SHELL_LOG
 
 echo

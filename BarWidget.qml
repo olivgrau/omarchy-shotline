@@ -17,7 +17,7 @@ import qs.Ui
 // IPC after every change, the timer is only the safety net.
 BarWidget {
   id: root
-  moduleName: "olivgrau.shotline"
+  moduleName: "io.github.olivgrau.shotline"
 
   property bool active: false
   property int count: 0
@@ -116,7 +116,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "olivgrau.shotline"
+    target: "io.github.olivgrau.shotline"
 
     function refresh(): void { root.refresh() }
     function shot(): void { root.run("shot") }
