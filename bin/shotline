@@ -189,7 +189,7 @@ start_session() {
     dir="$SESSIONS_DIR/$id-$suffix"
     ((suffix++))
   done
-  mkdir -p "$dir" || die "cannot create $dir"
+  (umask 077 && mkdir -p "$dir") || die "cannot create $dir"
   jq -n --argjson schema "$SCHEMA" --arg id "$(basename "$dir")" \
     --arg title "$title" --arg created "$(now_iso)" \
     '{schema:$schema, id:$id, title:$title, created:$created, shots:[]}' \
@@ -449,7 +449,10 @@ cmd_shot() {
   [[ $file == "$number-" ]] && file="$number-step"
   file="$file.png"
   mv "$target" "$dir/$file" || die "could not store the image"
-  chmod 644 "$dir/$file" 2>/dev/null
+  # grim inherits mktemp's 0600. finish copies the file into a project folder,
+  # where 0600 is too narrow, so widen it -- but only as far as the umask
+  # allows. A user who works under umask 077 keeps private files.
+  chmod "$(printf '%04o' "$((0666 & ~0$(umask)))")" "$dir/$file" 2>/dev/null
 
   local pixel_width=0 pixel_height=0 measured
   if measured=$(png_size "$dir/$file"); then
@@ -820,7 +823,11 @@ USAGE
 
 # --------------------------------------------------------------------- main
 
-mkdir -p "$STATE_DIR" "$SESSIONS_DIR" || die "cannot create $STATE_DIR"
+# A running session holds raw screenshots of whatever was on screen: passwords,
+# tokens, private messages. The working directory stays private, whatever the
+# umask says. The chmod also repairs a directory an older version left at 755.
+(umask 077 && mkdir -p "$STATE_DIR" "$SESSIONS_DIR") || die "cannot create $STATE_DIR"
+chmod 700 "$STATE_DIR" "$SESSIONS_DIR" 2>/dev/null
 
 command="${1:-shot}"
 (($# > 0)) && shift

@@ -160,7 +160,12 @@ check "the window class is detected" '[[ $(jq -r ".shots[0].app" "$dir/session.j
 check "the window title is detected" '[[ $(jq -r ".shots[0].window" "$dir/session.json") == "Testfenster" ]]'
 # A smaller window on another workspace must not hijack the detection.
 check "windows on other workspaces do not count" '[[ $(jq -r ".shots[0].app" "$dir/session.json") != "chrome" ]]'
-check "the PNG is readable by others" '[[ $(stat -c %a "$dir/01-die-login-maske.png") == 644 ]]'
+check "the PNG mode follows the umask" '[[ $(stat -c %a "$dir/01-die-login-maske.png") == $(printf "%o" "$((0666 & ~0$(umask)))") ]]'
+# A running session holds raw screenshots. No other user on the machine reads
+# them, no matter how permissive the umask is.
+check "the state directory is private" '[[ $(stat -c %a "$SHOTLINE_STATE_DIR") == 700 ]]'
+check "the sessions directory is private" '[[ $(stat -c %a "$SHOTLINE_STATE_DIR/sessions") == 700 ]]'
+check "the session directory is private" '[[ $(stat -c %a "$dir") == 700 ]]'
 check "a missing PNG header yields pixel size 0" '[[ $(jq -r ".shots[0].pixelWidth" "$dir/session.json") == 0 ]]'
 
 run shot --comment "Fehler nach dem Absenden" >/dev/null
@@ -173,6 +178,39 @@ check "umlauts in the file name are spelled out" '[[ -f "$dir/03-groesse-der-pru
 
 run shot --comment "" >/dev/null
 check "an empty comment yields a default name" '[[ -f "$dir/04-step.png" ]]'
+
+echo
+echo "Permissions"
+# The property, not the constant: whatever the umask is, a screenshot never
+# becomes wider than it allows, and the working directory stays at 700.
+# No subshells here -- the counters in check() have to reach the summary.
+umask_before=$(umask)
+
+umask 077
+fresh
+export SHOTLINE_GEOMETRY="100,200 812x460"
+run shot --comment "Geheim" >/dev/null
+dir=$(jq -r .dir <<<"$(run status --json)")
+check "a strict umask keeps the PNG private" '[[ $(stat -c %a "$dir/01-geheim.png") == 600 ]]'
+check "a strict umask keeps the state directory private" '[[ $(stat -c %a "$SHOTLINE_STATE_DIR") == 700 ]]'
+
+umask 000
+fresh
+export SHOTLINE_GEOMETRY="100,200 812x460"
+run shot --comment "Offen" >/dev/null
+dir=$(jq -r .dir <<<"$(run status --json)")
+check "a permissive umask still shields the state directory" '[[ $(stat -c %a "$SHOTLINE_STATE_DIR") == 700 ]]'
+check "a permissive umask still shields the session directory" '[[ $(stat -c %a "$dir") == 700 ]]'
+
+umask "$umask_before"
+
+# An older version left the directory at 755. Starting up repairs it.
+fresh
+mkdir -p "$SHOTLINE_STATE_DIR/sessions"
+chmod 755 "$SHOTLINE_STATE_DIR" "$SHOTLINE_STATE_DIR/sessions"
+run status >/dev/null
+check "a world-readable state directory from an older version is repaired" \
+  '[[ $(stat -c %a "$SHOTLINE_STATE_DIR") == 700 ]]'
 
 # A real PNG (built with Python) has to arrive with its pixel size.
 fresh

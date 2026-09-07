@@ -177,6 +177,17 @@ afterwards, so a failure along the way cannot destroy captures.
 `grim`, `hyprctl`, the editor and the dialogs with stubs. It runs without a
 Wayland session and never opens a window.
 
+## Privacy
+
+A screenshot holds whatever was on screen. Shotline keeps the working directory
+`~/.local/state/shotline` at mode `700`, so no other user on the machine can
+read a running session. Captured images take the mode your umask allows, never
+more: under `umask 077` they stay at `600`.
+
+`finish` copies the series into the directory you pick and deletes the working
+copy afterwards. Nothing leaves the machine, and no network call happens at any
+point.
+
 ## Requirements
 
 `grim`, `slurp`, `jq`, `python`. Optional: `hyprpicker` (freezes the screen
