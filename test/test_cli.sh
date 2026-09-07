@@ -276,14 +276,19 @@ check "a cancellation creates no shot" '[[ $(jq -r ".shots | length" "$dir/sessi
 echo
 echo "Keys during the selection"
 # Return and Ctrl+Return end slurp and leave nothing but a marker file.
-marker_dir="${XDG_RUNTIME_DIR:-/tmp}"
+# The test brings its own runtime directory: it must never read or write the
+# markers of the desktop session this runs in.
+export XDG_RUNTIME_DIR="$WORK/runtime"
+mkdir -p "$XDG_RUNTIME_DIR"
+marker_dir="$XDG_RUNTIME_DIR"
 fresh
 unset SHOTLINE_GEOMETRY
 export STUB_SLURP_OUTPUT=""
 cat >"$STUBS/slurp" <<'STUB'
 #!/bin/bash
-# Mimics the key binding: no result, but a marker file.
-[[ -n ${STUB_MARKER:-} ]] && touch "${XDG_RUNTIME_DIR:-/tmp}/omarchy-capture-region-$STUB_MARKER"
+# Mimics the key binding: no result, but a marker file. The fallback matches
+# the CLI's: this user's state directory, never world-writable /tmp.
+[[ -n ${STUB_MARKER:-} ]] && touch "${XDG_RUNTIME_DIR:-$SHOTLINE_STATE_DIR}/omarchy-capture-region-$STUB_MARKER"
 [[ -n ${STUB_SLURP_OUTPUT:-} ]] || exit 1
 echo "$STUB_SLURP_OUTPUT"
 STUB
@@ -308,6 +313,45 @@ out=$(run shot --comment "Darf nicht durchgehen"); rc=$?
 check "a stale marker is cleared before the selection" '[[ $rc -ne 0 ]]'
 check "a stale marker leads to no shot" '[[ $(jq -r ".shots | length" "$dir/session.json") == 2 ]]'
 rm -f "$marker_dir/omarchy-capture-region-window"
+
+# Without XDG_RUNTIME_DIR the marker has to fall back to this user's own state
+# directory. A fallback to world-writable /tmp would let any local process turn
+# a selection the user cancelled into a capture of the whole screen.
+# The stub writes to the state directory only, so the CLI finds the marker
+# exactly when its fallback points there.
+cat >"$STUBS/slurp" <<'STUB'
+#!/bin/bash
+[[ -n ${STUB_MARKER:-} ]] && touch "$SHOTLINE_STATE_DIR/omarchy-capture-region-$STUB_MARKER"
+[[ -n ${STUB_SLURP_OUTPUT:-} ]] || exit 1
+echo "$STUB_SLURP_OUTPUT"
+STUB
+chmod +x "$STUBS/slurp"
+
+# This case needs its own session; the block continues with the old one after.
+runtime_before="$XDG_RUNTIME_DIR"
+state_before="$SHOTLINE_STATE_DIR"
+dir_before="$dir"
+unset XDG_RUNTIME_DIR
+fresh
+unset SHOTLINE_GEOMETRY
+export STUB_SLURP_OUTPUT="" STUB_MARKER="fullscreen"
+run shot --comment "Ohne Runtime-Dir" >/dev/null
+fallback_dir=$(jq -r .dir <<<"$(run status --json)")
+check "without XDG_RUNTIME_DIR the marker falls back to the state directory" \
+  '[[ $(jq -r ".shots[0].geometry" "$fallback_dir/session.json") == "0,0 1920x1080" ]]'
+check "the fallback marker is cleaned up too" \
+  '[[ ! -e "$SHOTLINE_STATE_DIR/omarchy-capture-region-fullscreen" ]]'
+
+export XDG_RUNTIME_DIR="$runtime_before"
+export SHOTLINE_STATE_DIR="$state_before"
+dir="$dir_before"
+cat >"$STUBS/slurp" <<'STUB'
+#!/bin/bash
+[[ -n ${STUB_MARKER:-} ]] && touch "${XDG_RUNTIME_DIR:-$SHOTLINE_STATE_DIR}/omarchy-capture-region-$STUB_MARKER"
+[[ -n ${STUB_SLURP_OUTPUT:-} ]] || exit 1
+echo "$STUB_SLURP_OUTPUT"
+STUB
+chmod +x "$STUBS/slurp"
 
 # A pointer outside every window hits the monitor.
 export STUB_MARKER="window"

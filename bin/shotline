@@ -28,8 +28,12 @@ RECENT_MAX=8
 
 # The same paths omarchy-capture-region uses: the key bindings on slurp's
 # selection layer write there, no matter who started slurp.
-FULLSCREEN_MARKER="${XDG_RUNTIME_DIR:-/tmp}/omarchy-capture-region-fullscreen"
-WINDOW_MARKER="${XDG_RUNTIME_DIR:-/tmp}/omarchy-capture-region-window"
+# XDG_RUNTIME_DIR belongs to this user and is mode 700. Never fall back to
+# /tmp: there any local process could plant a marker, and a selection the user
+# cancelled would turn into a capture of the whole screen.
+MARKER_DIR="${XDG_RUNTIME_DIR:-$STATE_DIR}"
+FULLSCREEN_MARKER="$MARKER_DIR/omarchy-capture-region-fullscreen"
+WINDOW_MARKER="$MARKER_DIR/omarchy-capture-region-window"
 
 SELF_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RENDERER="${SHOTLINE_RENDERER:-$SELF_DIR/shotline-render}"

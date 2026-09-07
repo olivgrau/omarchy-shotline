@@ -173,7 +173,7 @@ afterwards, so a failure along the way cannot destroy captures.
 ./test/run-all.sh
 ```
 
-123 tests for the CLI, 26 for the renderer. The Bash test replaces `slurp`,
+133 tests for the CLI, 26 for the renderer. The Bash test replaces `slurp`,
 `grim`, `hyprctl`, the editor and the dialogs with stubs. It runs without a
 Wayland session and never opens a window.
 
