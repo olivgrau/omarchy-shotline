@@ -1,4 +1,7 @@
-# Shotline
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/wordmark.png">
+  <img src="assets/wordmark-light.png" alt="Shotline" width="340">
+</picture>
 
 An Omarchy plugin that captures a walkthrough of an app one step at a time.
 Every screenshot gets a comment right after you take it, optional pen or blur
@@ -160,6 +163,7 @@ Widget settings (`omarchy bar set`): `hideWhenIdle`, `showCount`, `showPen`,
 | `manifest.json` | plugin manifest, schema 1 |
 | `install.sh` | key bindings, CLI links, plugin registration |
 | `preview.png` | marketplace preview image |
+| `assets/` | logo, wordmark, social preview |
 | `docs/OVERVIEW.html` | one-page overview to look at |
 | `test/` | tests |
 
